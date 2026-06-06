@@ -1,0 +1,61 @@
+version: '3.9'
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: kele-doc-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: Taeon@0727
+      MYSQL_DATABASE: kele-doc
+    ports:
+      - "33306:3306"
+    volumes:
+      - ./mysql/data:/var/lib/mysql
+      - ./mysql/backup:/backup
+    networks:
+      - kele_tools
+
+  redis:
+    image: redis:7.2
+    container_name: kele-doc-redis
+    restart: always
+    command: redis-server --requirepass Taeon@0727
+    ports:
+      - "36379:6379"
+    volumes:
+      - ./redis/data:/data
+    networks:
+      - kele_tools
+
+  minio:
+    image: bitnami/minio
+    container_name: kele-doc-minio
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: Taeon@0727
+    ports:
+      - "39000:9000"
+      - "39090:9090"
+    volumes:
+      - ./minio/data:/data
+    command: minio server /data --console-address ":9090"
+    networks:
+      - kele_tools
+
+  kele-doc:
+    image: kele-doc:1.0
+    container_name: kele-doc
+    restart: unless-stopped
+    environment:
+      MEMORY: 1024m
+      ARGS: "--spring.profiles.active=prod --spring.config.location=classpath:/,/usr/config/kele-doc/"
+    ports:
+      - "2183:80"
+    networks:
+      - kele_tools
+
+networks:
+  kele_tools:
+

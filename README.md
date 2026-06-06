@@ -23,14 +23,14 @@
 
 ## 项目简要说明
 
-后端模块目前简单的分为了 lx-common 与 lx-core 模块：
+后端模块目前简单的分为了 kele-common 与 kele-core 模块：
 
-- lx-common：主要放一些通用的类，为后续可能得多模块做准备
-- lx-core：核心的实现类，比如控制层，服务层，数据库操作，启动类都在这个目录
+- kele-common：主要放一些通用的类，为后续可能得多模块做准备
+- kele-core：核心的实现类，比如控制层，服务层，数据库操作，启动类都在这个目录
 
 在该仓库的根目录下还有以下文件：
 
-- application-prod.yml：该文件是生产配置文件，主要配置数据库，redis，除系统属性与系统变量之外，该配置文件优先级比 lx-core
+- application-prod.yml：该文件是生产配置文件，主要配置数据库，redis，除系统属性与系统变量之外，该配置文件优先级比 kele-core
   模块下的 application.yml（该文件配置了一些默认的属性） 优先级更高，所以如果您有需求，您可以在这个文件里配置属性，覆盖
   application.yml 中的默认属性
 - doc.sql：理想文档的数据库脚本，该脚本是mysql的sql脚本，默认的数据库名为 lx_doc ，您可在自己的数据库中配置该名称，也可以修改成您想要的数据库名
@@ -77,7 +77,7 @@ sh run_no_in_docker.sh start 512m
 lx:
   doc:
     docStorage:
-      type: minio # 文档存储类型，目前已实现的有 dataBase，local，minio，oss，接口：com.laxqnsys.core.buz.doc.service.IDocFileContentStorageService
+      type: minio # 文档存储类型，目前已实现的有 dataBase，local，minio，oss，接口：com.kele.core.buz.doc.service.IDocFileContentStorageService
       path: ${app.name}/doc/content/ # 文档内容存储的位置，如果类型是 dataBase ，此属性无效
       minio:
         endpoint: http://localhost:9000
@@ -87,7 +87,7 @@ lx:
     whiteUrlList: /api/login,/api/register # 白名单url，配置之后将会被登录拦截器拦截
     blackUrlList: /api/** # 黑名单url，配置之后将会被登录拦截器拦截
     fileUpload:
-      type: minio # 文件上传类型，目前已实现local，minio，oss，接口 com.laxqnsys.core.buz.sys.service.ISysFileUploadService
+      type: minio # 文件上传类型，目前已实现local，minio，oss，接口 com.kele.core.buz.sys.service.ISysFileUploadService
       path: ${app.name}/attachment/ # 配置文件上传的地址
       minio:
         endpoint: http://localhost:9000
