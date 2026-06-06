@@ -34,6 +34,16 @@ const routes = [
         name: 'Panorama',
         path: 'panorama',
         component: () => import('@/pages/workspace/Panorama.vue')
+      },
+      {
+        name: 'GroupManage',
+        path: 'group-manage',
+        component: () => import('@/pages/workspace/GroupManage.vue')
+      },
+      {
+        name: 'UserManage',
+        path: 'user-manage',
+        component: () => import('@/pages/workspace/UserManage.vue')
       }
     ]
   },

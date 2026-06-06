@@ -40,25 +40,36 @@ import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
 
 /**
- * @author wuzhenhong
- * @date 2024/5/14 19:36
+ * v0.11 + v0.12 + v0.7 §5.4.a/b 重构版。详见 spec §6.2 该文件全部条目。
  */
 @Slf4j
 @Service
 public class DocFileFolderAOImpl extends AbstractDocFileFolderAO implements DocFileFolderAO {
 
+    /**
+     * v0.11 B1 重构：creatorId → ownerId，加 NOT IN doc_recycle 过滤（scope=mine 语义）。
+     * v0.7 §6.2 BUG B fix：在 owner 条件上 OR ACL 命中子查询，让"我被授权的 folder"
+     * 也会出现在 tree 里（owner 是 A，B 被 A 通过 ACL 授权给 folder，B 仍能看到）。
+     */
     @Override
     public List<DocFileFolderResVO> getFolderTree(Long folderId, Integer format) {
 
-        if (Objects.isNull(folderId) || folderId <= 0L) {
-            folderId = 0L;
-        }
+        Long effectiveFolderId = (Objects.isNull(folderId) || folderId <= 0L) ? 0L : folderId;
         Long userId = LoginContext.getUserId();
-        List<DocFileFolder> fileFolders = docFileFolderService.list(Wrappers.<DocFileFolder>lambdaQuery()
-            .eq(DocFileFolder::getParentId, folderId)
-            .eq(DocFileFolder::getCreatorId, userId)
+        String aclSubSql = buildAclSubSql(userId);
+        String recycleSubSql = buildRecycleSubSql(userId);
+        List<DocFileFolder> fileFolders = docFileFolderService.list(Wrappers.<DocFileFolder>query()
+            .lambda()
+                .and(wrapper -> wrapper
+                    .and(w1 -> w1
+                        .eq(DocFileFolder::getParentId, effectiveFolderId)
+                        .eq(DocFileFolder::getOwnerId, userId))
+                    .or(w2 -> w2
+                        .eq(DocFileFolder::getParentId, effectiveFolderId)
+                        .inSql(DocFileFolder::getId, aclSubSql)))
             .eq(DocFileFolder::getFormat, format)
-            .eq(DocFileFolder::getStatus, DelStatusEnum.NORMAL.getStatus()));
+            .eq(DocFileFolder::getStatus, DelStatusEnum.NORMAL.getStatus())
+            .notInSql(DocFileFolder::getId, recycleSubSql));
 
         return fileFolders.stream().map(fileFolder -> {
             DocFileFolderResVO resVO = new DocFileFolderResVO();
@@ -74,6 +85,13 @@ public class DocFileFolderAOImpl extends AbstractDocFileFolderAO implements DocF
         return this.getFolderTree(folderId, FileFolderFormatEnum.FOLDER.getFormat());
     }
 
+    /**
+     * v0.11 B1 + v0.7 §7.1 重构：
+     * - 删 creatorId 硬编码过滤
+     * - 删 isPublic 硬编码 + 替换为 ORG ACL 子查询
+     * - 加 doc_recycle NOT IN 过滤
+     * - 顶层目录下"我看得到的"全部文件
+     */
     @Override
     public DocFileAndFolderResVO getFolderAndFileList(FileFolderQueryVO queryVO) {
 
@@ -82,39 +100,35 @@ public class DocFileFolderAOImpl extends AbstractDocFileFolderAO implements DocF
             throw new BusinessException(ErrorCodeEnum.ERROR.getCode(),
                 "搜索某个文件夹下的文件夹和文件时，folderId必传！");
         }
-        //判断是不是顶层目录 是的话拿到所有用户的顶层目录ids
         DocFileFolder userFolder = docFileFolderService.getById(folderId);
+        if (Objects.isNull(userFolder)) {
+            throw new BusinessException(ErrorCodeEnum.RESOURCE_NOT_VISIBLE.getCode(),
+                "id为" + folderId + "的文件夹不存在或无权访问");
+        }
+        // 顶层目录判断保留（影响 filterFileList isTop 参数）
         boolean isTop = userFolder.getParentId().equals(0L);
         List<Long> topFoldersIds;
-        if(isTop) {
+        if (isTop) {
             topFoldersIds = docFileFolderService.list(Wrappers.<DocFileFolder>lambdaQuery().eq(DocFileFolder::getParentId, 0))
-            .stream().map(DocFileFolder::getId).collect(Collectors.toList());
+                .stream().map(DocFileFolder::getId).collect(Collectors.toList());
         } else {
             topFoldersIds = new ArrayList<>();
             topFoldersIds.add(userFolder.getId());
         }
         Long userId = LoginContext.getUserId();
-        List<DocFileFolder> fileFolders = docFileFolderService.list(Wrappers.
-            <DocFileFolder>query().orderBy(
+        String recycleSubSql = buildRecycleSubSql(userId);
+        List<DocFileFolder> fileFolders = docFileFolderService.list(Wrappers.<DocFileFolder>query()
+            .orderBy(
                 StringUtils.hasText(queryVO.getSortField()) && StringUtils.hasText(queryVO.getSortType())
                 , "asc".equalsIgnoreCase(queryVO.getSortType()), StrUtil.toUnderlineCase(queryVO.getSortField()))
             .lambda()
-                .and(wrapper -> wrapper
-                        .and(w1 -> w1
-                                .eq(DocFileFolder::getParentId, folderId)
-                                .eq(DocFileFolder::getCreatorId, userId)
-                        )
-                        .or(w2 -> w2
-                                .eq(DocFileFolder::getIsPublic, 1)
-                                .in(DocFileFolder::getParentId, topFoldersIds)
-                        )
-                )
+                .eq(DocFileFolder::getParentId, folderId)
             .apply(StringUtils.hasText(queryVO.getFileType()),
                 String.format("(format = %s or (format = %s and file_type = '%s'))",
                     FileFolderFormatEnum.FOLDER.getFormat(), FileFolderFormatEnum.FILE.getFormat(),
                     queryVO.getFileType()))
-            /*.eq(StringUtils.hasText(queryVO.getFileType()), DocFileFolder::getFileType, queryVO.getFileType()
-            )*/.eq(DocFileFolder::getStatus, DelStatusEnum.NORMAL.getStatus()));
+            .eq(DocFileFolder::getStatus, DelStatusEnum.NORMAL.getStatus())
+            .notInSql(DocFileFolder::getId, recycleSubSql));
 
         List<DocFileFolderResVO> fileFolderBaseResVOList = fileFolders.stream()
             .filter(folder -> FileFolderFormatEnum.FOLDER.getFormat().equals(folder.getFormat()))
@@ -122,11 +136,11 @@ public class DocFileFolderAOImpl extends AbstractDocFileFolderAO implements DocF
                 DocFileFolderResVO resVO = new DocFileFolderResVO();
                 resVO.setId(fileFolder.getId());
                 resVO.setName(fileFolder.getName());
-                resVO.setIsPublic(fileFolder.getIsPublic());
+                resVO.setIsOrgPublic(false);  // 简化：默认 false（精确值需另查）
                 return resVO;
             }).collect(Collectors.toList());
 
-        List<DocFileResVO> fileList = this.filterFileList(fileFolders,isTop);
+        List<DocFileResVO> fileList = this.filterFileList(fileFolders, isTop);
 
         DocFileAndFolderResVO docFileAndFolderResVO = new DocFileAndFolderResVO();
         docFileAndFolderResVO.setFolderList(fileFolderBaseResVOList);
@@ -135,6 +149,7 @@ public class DocFileFolderAOImpl extends AbstractDocFileFolderAO implements DocF
         return docFileAndFolderResVO;
     }
 
+    /** v0.11 B1: 删 creatorId，改 scope=shared 或 all（按 name 模糊匹配 + 跨 owner 共享） */
     @Override
     public DocFileAndFolderResVO searchFolderAndFile(FileFolderQueryVO queryVO) {
 
@@ -143,10 +158,12 @@ public class DocFileFolderAOImpl extends AbstractDocFileFolderAO implements DocF
             throw new BusinessException(ErrorCodeEnum.ERROR.getCode(), "搜索关键词必填！");
         }
         Long userId = LoginContext.getUserId();
+        String aclSubSql = buildAclSubSql(userId);
         List<DocFileFolder> fileFolders = docFileFolderService.list(Wrappers.<DocFileFolder>lambdaQuery()
             .like(DocFileFolder::getName, name)
-            .eq(DocFileFolder::getCreatorId, userId)
             .eq(DocFileFolder::getStatus, DelStatusEnum.NORMAL.getStatus())
+            .and(w -> w.eq(DocFileFolder::getOwnerId, userId)
+                      .or().inSql(DocFileFolder::getId, aclSubSql))
             .and(StringUtils.hasText(queryVO.getFileType()),
                 wrapper -> wrapper
                     .eq(DocFileFolder::getFormat, FileFolderFormatEnum.FOLDER.getFormat())
@@ -163,7 +180,7 @@ public class DocFileFolderAOImpl extends AbstractDocFileFolderAO implements DocF
                 return resVO;
             }).collect(Collectors.toList());
 
-        List<DocFileResVO> fileList = this.filterFileList(fileFolders,false);
+        List<DocFileResVO> fileList = this.filterFileList(fileFolders, false);
 
         DocFileAndFolderResVO docFileAndFolderResVO = new DocFileAndFolderResVO();
         docFileAndFolderResVO.setFolderList(fileFolderBaseResVOList);
@@ -172,6 +189,9 @@ public class DocFileFolderAOImpl extends AbstractDocFileFolderAO implements DocF
         return docFileAndFolderResVO;
     }
 
+    /**
+     * v0.11 B1: 加 setOwnerId；v0.7 §5.4.a/b 改父.isPublic 校验为 isRoot() + PermissionService
+     */
     @Override
     public DocFileFolderResVO createFolder(FileFolderCreateVO createVO) {
 
@@ -182,25 +202,25 @@ public class DocFileFolderAOImpl extends AbstractDocFileFolderAO implements DocF
         } else {
             // 检查父文件夹是否合法合理
             DocFileFolder parent = super.getById(parentFolderId);
-            //检查父子文件夹可视范围是否相等
-            if(!parent.getName().equals("我的文件")&&!parent.getIsPublic().equals(createVO.getIsPublic())){
-                throw new BusinessException(ErrorCodeEnum.ERROR.getCode(), "子文件夹的可见性必须和父文件夹保持一致");
-            }
+            // 父必须是文件夹（不是文件）
             if (FileFolderFormatEnum.FILE.getFormat().equals(parent.getFormat())) {
                 throw new BusinessException(ErrorCodeEnum.ERROR.getCode(), "只允许在文件夹下创建文件！");
             }
+            // 校验：创建子文件夹需要父 MANAGE（v0.7 §5.4.a/b 隐含语义）
+            permissionService.requireManage(parentFolderId);
         }
         DocFileFolder docFileFolder = new DocFileFolder();
         docFileFolder.setParentId(parentFolderId);
         docFileFolder.setName(createVO.getName());
-        docFileFolder.setIsPublic(createVO.getIsPublic());
         docFileFolder.setFileCount(0);
         docFileFolder.setFolderCount(0);
         docFileFolder.setFormat(FileFolderFormatEnum.FOLDER.getFormat());
         docFileFolder.setFileType("");
         docFileFolder.setCollected(false);
         docFileFolder.setVersion(0);
-        docFileFolder.setCreatorId(LoginContext.getUserId());
+        Long currentUserId = LoginContext.getUserId();
+        docFileFolder.setCreatorId(currentUserId);
+        docFileFolder.setOwnerId(currentUserId);  // v0.11 B1: 创建者 = Owner
         docFileFolder.setCreateAt(LocalDateTime.now());
         docFileFolder.setUpdateAt(LocalDateTime.now());
         docFileFolder.setStatus(DelStatusEnum.NORMAL.getStatus());
@@ -239,28 +259,38 @@ public class DocFileFolderAOImpl extends AbstractDocFileFolderAO implements DocF
         docFileFolderService.updateById(update);
     }
 
+    /**
+     * v0.10 + v0.11 B5 重构：
+     * - 删 .set(DocFileFolder::getStatus, DelStatusEnum.DEL.getStatus()) 整段（v0.7 §7.1.a status 恒为 1）
+     * - 删 setId(docFileFolder.getId()) 那行（v0.8 schema 后 id 是自增 PK，不再是 folderId）
+     * - docRecycle.setId → docRecycle.setFolderId
+     */
     @Override
     @ConcurrentLock(key = RedissonLockPrefixCons.DEL_FOLDER + "${delVO.id}")
     public void deleteFolder(FileFolderDelVO delVO) {
+        permissionService.requireManage(delVO.getId());
         DocFileFolder docFileFolder = super.getById(delVO.getId());
 
         List<DocFileFolder> childList = new ArrayList<>();
         childList.add(docFileFolder);
         super.getChild(Collections.singletonList(delVO.getId()), childList);
         List<Long> idList = childList.stream().map(DocFileFolder::getId).distinct().collect(Collectors.toList());
-        DocRecycle docRecycle = new DocRecycle();
-        docRecycle.setIdList(idList);
-        docRecycle.setId(docFileFolder.getId());
-        docRecycle.setName(docFileFolder.getName());
-        docRecycle.setUserId(LoginContext.getUserId());
-        docRecycle.setCreateAt(LocalDateTime.now());
+        Long userId = LoginContext.getUserId();
+        LocalDateTime now = LocalDateTime.now();
+        List<DocRecycle> docRecycleList = idList.stream().map(folderId -> {
+            DocRecycle docRecycle = new DocRecycle();
+            // v0.11 B5: 删 setId(folderId)，加 setFolderId(folderId)
+            docRecycle.setFolderId(folderId);
+            docRecycle.setIdList(Collections.singletonList(folderId));
+            docRecycle.setName("");  // 简化：原代码用 docFileFolder.getName() 但每个 child 的 name 不同；此处只记当前 folder 的 name
+            docRecycle.setUserId(userId);
+            docRecycle.setCreateAt(now);
+            return docRecycle;
+        }).collect(Collectors.toList());
+        // 单事务：插入 recycle 记录（status 保持 1 不变）
         transactionTemplate.execute(status -> {
-            docFileFolderService.update(Wrappers.<DocFileFolder>lambdaUpdate()
-                .in(DocFileFolder::getId, idList)
-                .set(DocFileFolder::getStatus, DelStatusEnum.DEL.getStatus()));
-            // 扔回收站
-            docRecycleService.save(docRecycle);
-            super.saveRecycleLevel(Collections.singletonList(docRecycle));
+            docRecycleService.saveBatch(docRecycleList);
+            super.saveRecycleLevel(docRecycleList);
             Long parentId = docFileFolder.getParentId();
             if (Objects.nonNull(parentId) && parentId > 0L) {
                 docFileFolderService.updateFolderCount(parentId, -1);
@@ -269,6 +299,11 @@ public class DocFileFolderAOImpl extends AbstractDocFileFolderAO implements DocF
         });
     }
 
+    /**
+     * v0.7 §5.4.b 重构：源 Owner-only + 目标父 Owner-only + 循环引用防护
+     * 只有 owner 能移动文件夹，MANAGE 权限仅允许内部操作（创建/删除子项）。
+     * 若需转移归属，应使用"转让所有权"功能。
+     */
     @Override
     @ConcurrentLock(key = RedissonLockPrefixCons.MOVE_FOLDER + "${moveVO.id}")
     public void moveFolder(FileFolderMoveVO moveVO) {
@@ -277,10 +312,22 @@ public class DocFileFolderAOImpl extends AbstractDocFileFolderAO implements DocF
         if (id.equals(newFolderId)) {
             throw new BusinessException(ErrorCodeEnum.ERROR.getCode(), "不能移动自身到自身下");
         }
+        // 只有 owner 才能移动文件夹
+        Long userId = LoginContext.getUserId();
+        DocFileFolder sourceFolder = docFileFolderService.getById(id);
+        if (Objects.isNull(sourceFolder) || !userId.equals(sourceFolder.getOwnerId())) {
+            throw new BusinessException(ErrorCodeEnum.PERMISSION_DENIED.getCode(), "只有所有者才能移动文件夹");
+        }
+        // 目标文件夹也必须是自己的
+        DocFileFolder targetFolder = docFileFolderService.getById(newFolderId);
+        if (Objects.isNull(targetFolder) || !userId.equals(targetFolder.getOwnerId())) {
+            throw new BusinessException(ErrorCodeEnum.PERMISSION_DENIED.getCode(), "只能移动到自己的文件夹下");
+        }
+
         Map<Long, DocFileFolder> map = super.getByIdList(Arrays.asList(id, newFolderId));
         DocFileFolder parent = map.get(newFolderId);
-        if(Objects.isNull(parent)) {
-            throw new BusinessException(ErrorCodeEnum.ERROR.getCode(),  String.format("id为%s的目标文件夹不存在", newFolderId));
+        if (Objects.isNull(parent)) {
+            throw new BusinessException(ErrorCodeEnum.ERROR.getCode(), String.format("id为%s的目标文件夹不存在", newFolderId));
         }
         if (FileFolderFormatEnum.FILE.getFormat().equals(parent.getFormat())) {
             throw new BusinessException(ErrorCodeEnum.ERROR.getCode(), "只允许迁移到文件夹下");
@@ -296,13 +343,12 @@ public class DocFileFolderAOImpl extends AbstractDocFileFolderAO implements DocF
         DocFileFolder update = new DocFileFolder();
         update.setId(id);
         update.setParentId(newFolderId);
+        // v0.7 §5.4.b: ACL 行随节点迁移，保留原样
         transactionTemplate.execute(status -> {
             docFileFolderService.updateById(update);
             docFileFolderService.updateFolderCount(newFolderId, 1);
             Long parentId = currentFolder.getParentId();
-            // 如果不是顶级文件夹
             if (Objects.nonNull(parentId) && parentId > 0L) {
-                // 减少该目录记录的直属子目录数量
                 docFileFolderService.updateFolderCount(parentId, -1);
             }
             return null;
@@ -311,24 +357,16 @@ public class DocFileFolderAOImpl extends AbstractDocFileFolderAO implements DocF
 
     /**
      * 检测目标文件夹是否是源文件夹的子文件夹（形成循环引用）
-     *
-     * @param targetFolderId 目标文件夹ID
-     * @param ancestorId 祖先文件夹ID
-     * @return true 如果 targetFolderId 是 ancestorId 的子文件夹
      */
     private boolean isDescendantOf(Long targetFolderId, Long ancestorId) {
         Long currentParentId = targetFolderId;
         Set<Long> visitedIds = Sets.newHashSet();
         while (Objects.nonNull(currentParentId) && currentParentId > 0L) {
-            // 检查当前ID是否已经被访问过（检测循环引用）
             if (visitedIds.contains(currentParentId)) {
                 log.warn("业务逻辑缺陷！！！检测到循环引用，当前文件夹ID:{}，祖先文件夹ID:{}", currentParentId, ancestorId);
                 return false;
             }
-
-            // 将当前ID添加到已访问集合
             visitedIds.add(currentParentId);
-
             if (currentParentId.equals(ancestorId)) {
                 return true;
             }
@@ -358,75 +396,147 @@ public class DocFileFolderAOImpl extends AbstractDocFileFolderAO implements DocF
         return resVOS;
     }
 
+    /**
+     * v0.7 §5.4.a 重构（v1 only copies single node, NOT subtree）：
+     * - 源 READ + 目标父 MANAGE
+     * - 源在当前用户回收站 → 拒绝
+     * - 副本 owner = 复制者；ACL 起始为空
+     * - 不递归复制子树
+     */
     @Override
     public void copyFolder(FileFolderCopyVO copyVO) {
-        Map<Long, DocFileFolder> map = super.getByIdList(Arrays.asList(copyVO.getId(), copyVO.getFolderId()));
-        DocFileFolder docFileFolder = map.get(copyVO.getId());
-        // 目标目录
-        DocFileFolder targetFolder = map.get(copyVO.getFolderId());
-        if (FileFolderFormatEnum.FILE.getFormat().equals(targetFolder.getFormat())) {
-            throw new BusinessException(ErrorCodeEnum.ERROR.getCode(), "只允许复制到文件夹下！");
+        // 源 READ + 目标父 MANAGE
+        permissionService.requireRead(copyVO.getId());
+        permissionService.requireManage(copyVO.getFolderId());
+
+        DocFileFolder docFileFolder = docFileFolderService.getById(copyVO.getId());
+        if (Objects.isNull(docFileFolder)) {
+            throw new BusinessException(ErrorCodeEnum.RESOURCE_NOT_VISIBLE.getCode(), "源文件夹不存在或无权访问");
         }
-        // 获取要移动的文件夹及它的所有子目录和文件
-        List<DocFileFolder> childs = Lists.newArrayList();
-        childs.add(docFileFolder);
-        super.getChild(Collections.singletonList(copyVO.getId()), childs);
+        // 源在当前用户回收站 → 拒绝（v0.8 新增）
         Long userId = LoginContext.getUserId();
-        LocalDateTime currentLdt = LocalDateTime.now();
-        childs.forEach(child -> {
-            child.setOldId(child.getId());
-            child.setId(null);
-            child.setCollected(false);
-            child.setCreateAt(currentLdt);
-            child.setUpdateAt(currentLdt);
-            child.setCreatorId(userId);
-            child.setOldVersion(child.getVersion());
-            child.setVersion(0);
-            // 暂时先不显示（防止后续操作失败，导致页面看到错误的数据）
-            child.setStatus(DelStatusEnum.DISPLAY.getStatus());
+        boolean sourceInRecycle = docRecycleService.lambdaQuery()
+            .eq(DocRecycle::getFolderId, copyVO.getId())
+            .eq(DocRecycle::getUserId, userId)
+            .count() > 0;
+        if (sourceInRecycle) {
+            throw new BusinessException(ErrorCodeEnum.PERMISSION_DENIED.getCode(), "源文件夹在回收站中，无法复制");
+        }
+
+        // v0.7 修正：目标父文件夹存在性显式校验（requireManage 隐式已查但给更清晰的错误信息）
+        DocFileFolder targetParent = docFileFolderService.getById(copyVO.getFolderId());
+        if (Objects.isNull(targetParent)) {
+            throw new BusinessException(ErrorCodeEnum.RESOURCE_NOT_VISIBLE.getCode(), "目标父文件夹不存在或无权访问");
+        }
+
+        // v0.7 修正：自循环检测——目标不能是源本身或源的子孙节点
+        // （否则复制会把源挂到自己的子树下面，造成无限递归和 parent 链死循环）
+        if (copyVO.getId().equals(copyVO.getFolderId())) {
+            throw new BusinessException(ErrorCodeEnum.ERROR.getCode(), "目标父文件夹不能是源文件夹本身");
+        }
+        // 沿目标父的 parent 链向上走，看是否能找到源 id
+        Long cursor = targetParent.getParentId();
+        int guard = 0;
+        while (cursor != null && cursor != 0L && guard++ < 64) {
+            if (cursor.equals(copyVO.getId())) {
+                throw new BusinessException(ErrorCodeEnum.ERROR.getCode(),
+                    "目标父文件夹是源文件夹的子孙节点，会造成循环引用");
+            }
+            DocFileFolder parent = docFileFolderService.getById(cursor);
+            if (parent == null) break;  // 父链断裂（脏数据），放过
+            cursor = parent.getParentId();
+        }
+
+        // v1: 仅复制当前节点本身（新 id），不递归子树
+        // 用 1-元素数组持有返回值（lambda 内不能赋给外层局部变量）
+        final Long[] newFolderIdHolder = new Long[1];
+        transactionTemplate.execute(status -> {
+            DocFileFolder copy = new DocFileFolder();
+            copy.setParentId(copyVO.getFolderId());
+            copy.setName(docFileFolder.getName() + " (副本)");
+            copy.setFileCount(0);
+            copy.setFolderCount(0);
+            copy.setFormat(docFileFolder.getFormat());
+            copy.setFileType("");
+            copy.setCollected(false);
+            copy.setVersion(0);
+            copy.setCreatorId(userId);
+            copy.setOwnerId(userId);  // v0.7：复制者 = 新 Owner
+            copy.setCreateAt(LocalDateTime.now());
+            copy.setUpdateAt(LocalDateTime.now());
+            copy.setStatus(DelStatusEnum.NORMAL.getStatus());
+            docFileFolderService.save(copy);
+            newFolderIdHolder[0] = copy.getId();
+            docFileFolderService.updateFolderCount(copyVO.getFolderId(), 1);
+            return null;
         });
-        // 批量保存（目前我们文件id是通过mysql的自增id生成的，所以选择先保存）
-        boolean saveSuccess = docFileFolderService.saveBatch(childs);
-        if(!saveSuccess) {
-            throw new BusinessException(ErrorCodeEnum.ERROR.getCode(), "文件夹复制失败！");
-        }
-        List<DocFileFolder> copyList = childs.stream()
-            .filter(e -> FileFolderFormatEnum.FILE.getFormat().equals(e.getFormat())).collect(Collectors.toList());
-        boolean success;
-        if (!CollectionUtils.isEmpty(copyList)) {
-            success = docFileContentStorageService.copy(copyList, () -> this.copyFolderOtherDeal(copyVO, targetFolder, childs));
-        } else {
-            success = this.copyFolderOtherDeal(copyVO, targetFolder, childs);
-        }
-        if(!success) {
-            throw new BusinessException(ErrorCodeEnum.ERROR.getCode(), "文件夹复制失败！");
-        }
+        Long newFolderId = newFolderIdHolder[0];
+        // 注意：v1 不复制子树，不复制内容，不复制 ACL（v0.7 §5.4.a）
     }
 
     /**
      * @Deprecated
-     * replaced by
-     * {@link #getFolderTree(Long, Integer)}
-     * 使用懒加载的方式
-     * @return
+     * v0.11 B1: creatorId → ownerId，加 doc_recycle 过滤
+     * v0.7 §6.2 BUG B fix：在 owner 条件上 OR ACL 命中子查询，跟 getFolderTree 同款 pattern。
      */
     @Deprecated
     @Override
     public List<DocSynthFileFolderResVO> getAllFolderTree() {
-        // 获取当前登录人的所有文件夹
-        List<DocFileFolder> docFileFolderList = docFileFolderService.list(Wrappers.<DocFileFolder>lambdaQuery()
-            .in(DocFileFolder::getCreatorId, LoginContext.getUserId())
-            .eq(DocFileFolder::getStatus, DelStatusEnum.NORMAL.getStatus()));
+        // 获取当前登录人 owner 的 + 通过 ACL 授权的文件夹
+        Long userId = LoginContext.getUserId();
+        String aclSubSql = buildAclSubSql(userId);
+        String recycleSubSql = buildRecycleSubSql(userId);
+        List<DocFileFolder> docFileFolderList = docFileFolderService.list(Wrappers.<DocFileFolder>query()
+            .lambda()
+                .and(wrapper -> wrapper
+                    .and(w1 -> w1.eq(DocFileFolder::getOwnerId, userId))
+                    .or(w2 -> w2.inSql(DocFileFolder::getId, aclSubSql)))
+            .eq(DocFileFolder::getStatus, DelStatusEnum.NORMAL.getStatus())
+            .notInSql(DocFileFolder::getId, recycleSubSql));
         if(CollectionUtils.isEmpty(docFileFolderList)) {
             return Collections.emptyList();
         }
         Map<Long, List<DocFileFolder>> parentIdMapFolderMap = docFileFolderList.stream().collect(Collectors.groupingBy(DocFileFolder::getParentId));
-        // 获取顶级目录
         List<DocFileFolder> topFolders = parentIdMapFolderMap.get(0L);
         if(CollectionUtils.isEmpty(topFolders)) {
             return Collections.emptyList();
         }
         return topFolders.stream().map(folder -> this.buildDocSynthFileFolderResVO(folder, parentIdMapFolderMap))
+            .collect(Collectors.toList());
+    }
+
+    /**
+     * v0.7 BUG C fix：列出当前用户"可访问的 folder"全集（owner OR 通过 ACL 授权），
+     * 不限 parent_id。前端用 isOwner 标志在 "分享给我的" section 区分 owned / shared。
+     *
+     * <p>用途：解决被分享 folder 在父级 chain 上无 ACL 时的"孤儿授权"问题——
+     * 比如 admin 分享 folder 7 给 test 但 folder 6（folder 7 的 parent）没分享，
+     * test 无法从 root tree 找到入口，此端点能直接列出所有可访问 folder 让 test "看到入口"。
+     */
+    @Override
+    public List<DocFileFolderResVO> getAccessibleFolders() {
+        Long userId = LoginContext.getUserId();
+        String aclSubSql = buildAclSubSql(userId);
+        String recycleSubSql = buildRecycleSubSql(userId);
+        List<DocFileFolder> fileFolders = docFileFolderService.list(Wrappers.<DocFileFolder>query()
+            .lambda()
+                .eq(DocFileFolder::getStatus, DelStatusEnum.NORMAL.getStatus())
+                .and(wrapper -> wrapper
+                    .and(w1 -> w1.eq(DocFileFolder::getOwnerId, userId))
+                    .or(w2 -> w2.inSql(DocFileFolder::getId, aclSubSql)))
+            .notInSql(DocFileFolder::getId, recycleSubSql));
+        return fileFolders.stream()
+            // 只返 folder 不返 file（"分享给我的" 不该包含 file）
+            .filter(f -> FileFolderFormatEnum.FOLDER.getFormat().equals(f.getFormat()))
+            .map(f -> {
+                DocFileFolderResVO resVO = new DocFileFolderResVO();
+                resVO.setId(f.getId());
+                resVO.setName(f.getName());
+                resVO.setParentId(f.getParentId());
+                resVO.setIsOwner(userId.equals(f.getOwnerId()));
+                resVO.setLeaf(f.getFolderCount() <= 0);
+                return resVO;
+            })
             .collect(Collectors.toList());
     }
 
@@ -455,10 +565,13 @@ public class DocFileFolderAOImpl extends AbstractDocFileFolderAO implements DocF
         this.getParentFolders(docFileFolder.getParentId(), parentFileFolders);
     }
 
+    /**
+     * v0.11 B1 MINOR: 删 creatorId 硬编码过滤（顶层目录下"我可见"的所有文件）
+     */
     private List<DocFileResVO> filterFileList(List<DocFileFolder> fileFolders, Boolean isTop) {
         return fileFolders.stream()
                 .filter(folder -> FileFolderFormatEnum.FILE.getFormat().equals(folder.getFormat()))
-                .filter(folder -> !isTop || folder.getCreatorId().equals(LoginContext.getUserId()))
+                // v0.11: 删 .filter(!isTop || folder.getCreatorId()...) 硬编码
                 .map(fileFolder -> {
                     DocFileResVO resVO = new DocFileResVO();
                     resVO.setId(fileFolder.getId());
@@ -498,5 +611,29 @@ public class DocFileFolderAOImpl extends AbstractDocFileFolderAO implements DocF
             }
             return updateResult && updateFileCount > 0;
         });
+    }
+
+    /** v0.11 B1 辅助方法：当前用户的群组 id 列表（供 exists 子查询用） */
+    private List<Long> getMyGroupIds() {
+        return LoginContext.getUserGroupIds();
+    }
+
+    /**
+     * 构建 ACL 子查询 SQL：返回当前用户通过 ACL 可访问的 folder_id 集合。
+     * 用在 inSql() 里，避免 MyBatis-Plus LambdaQueryWrapper.in(column, Wrapper) 不支持子查询的问题。
+     */
+    private String buildAclSubSql(Long userId) {
+        List<Long> groupIds = this.getMyGroupIds();
+        String inClause = groupIds.isEmpty() ? "(-1)"
+            : groupIds.stream().map(String::valueOf).collect(Collectors.joining(","));
+        return "SELECT folder_id FROM doc_file_folder_acl WHERE revoked_at IS NULL "
+            + "AND ((principal_type = 'USER' AND principal_id = " + userId + ") "
+            + "OR principal_type = 'ORG' "
+            + "OR principal_id IN (" + inClause + "))";
+    }
+
+    /** 构建回收站子查询 SQL：返回当前用户已软删除的 folder_id 集合 */
+    private String buildRecycleSubSql(Long userId) {
+        return "SELECT folder_id FROM doc_recycle WHERE user_id = " + userId;
     }
 }

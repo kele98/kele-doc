@@ -1,6 +1,7 @@
 package com.kele.core.other.config;
 
 import com.kele.core.other.converter.StringToLongConverter;
+import com.kele.core.buz.doc.dao.mapper.GroupMemberMapper;
 import com.kele.core.other.interceptor.LoginHandlerInterceptor;
 import com.kele.core.other.properties.KeleDocWebProperties;
 import com.kele.core.other.properties.StaticResourceProperties;
@@ -35,9 +36,12 @@ public class WebMvcConfigure implements WebMvcConfigurer {
     @Autowired
     private KeleDocWebProperties lxDocWebProperties;
 
+    @Autowired
+    private GroupMemberMapper groupMemberMapper;
+
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
-        LoginHandlerInterceptor loginHandlerInterceptor = new LoginHandlerInterceptor(stringRedisTemplate);
+        LoginHandlerInterceptor loginHandlerInterceptor = new LoginHandlerInterceptor(stringRedisTemplate, groupMemberMapper);
         List<String> whiteUrlList = Optional.ofNullable(lxDocWebProperties.getWhiteUrlList())
             .orElse(Collections.emptyList());
         whiteUrlList.forEach(loginHandlerInterceptor::addWhiteUrl);

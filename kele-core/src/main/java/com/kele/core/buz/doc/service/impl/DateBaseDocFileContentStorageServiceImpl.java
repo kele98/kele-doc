@@ -8,6 +8,7 @@ import com.kele.core.buz.doc.dao.entity.DocFileContent;
 import com.kele.core.buz.doc.dao.entity.DocFileFolder;
 import com.kele.core.buz.doc.model.dto.DocFileCopyDTO;
 import com.kele.core.buz.doc.model.vo.DocFileContentResVO;
+import com.kele.core.buz.doc.permission.PermissionService;
 import com.kele.core.buz.doc.service.IDocFileContentService;
 import java.io.OutputStream;
 import java.net.URLEncoder;
@@ -38,6 +39,9 @@ public class DateBaseDocFileContentStorageServiceImpl implements IDocFileContent
 
     @Autowired
     private IDocFileContentService docFileContentService;
+
+    @Autowired
+    private PermissionService permissionService;
 
     @Autowired
     private TransactionTemplate transactionTemplate;
@@ -172,13 +176,15 @@ public class DateBaseDocFileContentStorageServiceImpl implements IDocFileContent
         }
     }
 
+    /**
+     * v0.11 B1: 删 creatorId 硬编码，改走 permissionService.requireRead。
+     * 这是文件内容**是否对共享用户开放**的关键路径（spec §1.4）。
+     */
     private DocFileContent getByFileId(Long fileId) {
+        permissionService.requireRead(fileId);  // §1.4: 文件内容沿用 doc_file_folder 的 ACL
         DocFileContent docFileContent = docFileContentService.getById(fileId);
         if (Objects.isNull(docFileContent)) {
-            throw new BusinessException(ErrorCodeEnum.ERROR.getCode(), String.format("id为%s的文件未找到", fileId));
-        }
-        if (!docFileContent.getCreatorId().equals(LoginContext.getUserId())) {
-            throw new BusinessException(ErrorCodeEnum.ERROR.getCode(), "非法访问！");
+            throw new BusinessException(ErrorCodeEnum.RESOURCE_NOT_VISIBLE.getCode(), String.format("id为%s的文件未找到", fileId));
         }
         return docFileContent;
     }

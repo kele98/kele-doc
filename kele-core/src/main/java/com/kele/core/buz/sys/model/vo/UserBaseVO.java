@@ -23,7 +23,7 @@ public class UserBaseVO {
 
     @NotBlank(message = "密码不能为空！")
     @Length(min = 8, max = 16, message = "密码长度8-16位")
-    @Pattern(regexp = "^(?![\\da-z]+$)(?![\\dA-Z]+$)(?![\\d.!#$%^&*]+$)(?![a-zA-Z]+$)(?![a-z.!#$%^&*]+$)(?![A-Z.!#$%^&*]+$)[\\da-zA-z.!#$%^&*]{8,16}", message = "密码必须包含数字、大写字母、小写字母、特殊字符（!#$%^&*）其中3种")
+    @Pattern(regexp = "^(?![\\da-z]+$)(?![\\dA-Z]+$)(?![\\d.!#$%^&*@]+$)(?![a-zA-Z]+$)(?![a-z.!#$%^&*@]+$)(?![A-Z.!#$%^&*@]+$)[\\da-zA-z.!#$%^&*@]{8,16}", message = "密码必须包含数字、大写字母、小写字母、特殊字符（!#$%^&*@）其中3种")
     @ApiModelProperty(value = "密码")
     private String password;
 }

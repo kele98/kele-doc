@@ -12,6 +12,7 @@ import com.kele.core.other.constants.CommonCons;
 import com.kele.core.other.context.LoginContext;
 import com.kele.core.buz.doc.dao.entity.DocFileFolder;
 import com.kele.core.buz.doc.model.vo.DocFileContentResVO;
+import com.kele.core.buz.doc.permission.PermissionService;
 import com.kele.core.other.properties.DocContentStorageProperties;
 import com.kele.core.other.properties.KeleDocWebProperties;
 import com.kele.core.other.properties.OssFileUploadProperties;
@@ -55,6 +56,9 @@ public class OssDocFileContentStorageServiceImpl extends AbstractFileSystemStora
     private String bucket;
 
     private String path;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    private PermissionService permissionService;
 
     public OssDocFileContentStorageServiceImpl(KeleDocWebProperties lxDocWebProperties) {
         DocContentStorageProperties docStorage = lxDocWebProperties.getDocStorage();
@@ -144,6 +148,8 @@ public class OssDocFileContentStorageServiceImpl extends AbstractFileSystemStora
 
     @Override
     public DocFileContentResVO getFileContent(DocFileFolder docFileFolder) {
+        // v0.11 B1: 文件内容沿用 doc_file_folder 的 ACL
+        permissionService.requireRead(docFileFolder.getId());
         Long id = docFileFolder.getId();
         String filePath = this.getFilePath(id, docFileFolder.getVersion());
         OSSObject ossObject = this.getFile(filePath);
@@ -167,6 +173,8 @@ public class OssDocFileContentStorageServiceImpl extends AbstractFileSystemStora
 
     @Override
     public void downloadFileContent(DocFileFolder docFileFolder, HttpServletResponse response) {
+        // v0.11 B1: 同 getFileContent
+        permissionService.requireRead(docFileFolder.getId());
         Long id = docFileFolder.getId();
         String filePath = this.getFilePath(id, docFileFolder.getVersion());
         OSSObject ossObject = this.getFile(filePath);

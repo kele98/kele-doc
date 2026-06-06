@@ -7,6 +7,7 @@ import com.kele.core.other.context.LoginContext;
 import com.kele.core.buz.doc.dao.entity.DocFileFolder;
 import com.kele.core.buz.doc.model.dto.DocFileCopyDTO;
 import com.kele.core.buz.doc.model.vo.DocFileContentResVO;
+import com.kele.core.buz.doc.permission.PermissionService;
 import com.kele.core.other.properties.DocContentStorageProperties;
 import com.kele.core.other.properties.KeleDocWebProperties;
 import java.io.ByteArrayOutputStream;
@@ -45,6 +46,9 @@ public class LocalDocFileContentStorageServiceImpl extends AbstractFileSystemSto
     // file_{版本}
     private static final String FILE_VERSION_PREFIX = "file_%s";
     private String path;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    private PermissionService permissionService;
 
     public LocalDocFileContentStorageServiceImpl(KeleDocWebProperties lxDocWebProperties) {
         DocContentStorageProperties storage = lxDocWebProperties.getDocStorage();
@@ -144,6 +148,8 @@ public class LocalDocFileContentStorageServiceImpl extends AbstractFileSystemSto
 
     @Override
     public DocFileContentResVO getFileContent(DocFileFolder docFileFolder) {
+        // v0.11 B1: 文件内容沿用 doc_file_folder 的 ACL（§1.4）
+        permissionService.requireRead(docFileFolder.getId());
         Long id = docFileFolder.getId();
         String filePath = this.getFilePath(id, docFileFolder.getVersion());
         File file = new File(filePath);
@@ -170,6 +176,8 @@ public class LocalDocFileContentStorageServiceImpl extends AbstractFileSystemSto
 
     @Override
     public void downloadFileContent(DocFileFolder docFileFolder, HttpServletResponse response) {
+        // v0.11 B1: 同 getFileContent
+        permissionService.requireRead(docFileFolder.getId());
         Long id = docFileFolder.getId();
         String filePath = this.getFilePath(id, docFileFolder.getVersion());
         File file = new File(filePath);

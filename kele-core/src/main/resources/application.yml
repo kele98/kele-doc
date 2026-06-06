@@ -17,7 +17,7 @@ mybatis-plus:
   mapper-locations: classpath*:/mybatis/*.xml
   config-location: classpath:mybatis-config.xml
 
-ty:
+kele:
   doc:
     restTemplate:
       enable: true
@@ -29,32 +29,45 @@ ty:
       type: minio # 文档存储类型，目前已实现的有 dataBase，local，minio，oss，接口：com.kele.core.buz.doc.service.IDocFileContentStorageService
       path: ${app.name}/doc/content/ # 文档内容存储的位置，如果类型是 dataBase ，此属性无效
       minio:
-        endpoint: http://192.168.66.110:9000
+        endpoint: http://localhost:19000
         bucket: test
         accessKey: minio
-        secretKey: 0B89860766F9
+        secretKey: Taeon@123
     whiteUrlList: /api/login,/api/register # 白名单url，配置之后将会被登录拦截器拦截
     blackUrlList: /api/** # 黑名单url，配置之后将会被登录拦截器拦截
     fileUpload:
       type: minio # 文件上传类型，目前已实现local，minio，oss，接口 com.kele.core.buz.sys.service.ISysFileUploadService
       path: ${app.name}/attachment/ # 配置文件上传的地址
       minio:
-        endpoint: http://192.168.66.110:9000
+        endpoint: http://localhost:19000
         bucket: test
         accessKey: minio
-        secretKey: 0B89860766F9
+        secretKey: Taeon@123
     indexHtmlWebPath: /index.html # 配置欢迎页
     staticResources:
       - pathPatterns: /static/** # 配置静态资源访问的web uri
         resourceLocations: file:///${kele.doc.fileUpload.path} # 配置静态资源所在物理磁盘的位置，不过静态资源的访问尽量使用 nginx 反向代理
       - pathPatterns: /**
         resourceLocations: classpath:/static/kele-doc/
+    # v0.6 B3: 启动期校验 sys_user_info.id=1 存在且 role=ADMIN
+    startup:
+      admin-check:
+        enabled: true
+    # v0.6 M5: 权限引擎实现切换（false=CTE 主路径 / true=app-layer walk fallback）
+    permission:
+      fallback: false
 spring:
   servlet:
     multipart:
       max-file-size: 100MB
       max-request-size: 100MB
   application.name: ${app.name}
+  # Flyway (V2__sharing.sql migration)
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    validate-on-migrate: false
   mvc:
     format:
       date-time: "yyyy-MM-dd HH:mm:ss"
@@ -87,11 +100,11 @@ spring:
       maxOpenPreparedStatements: 20
       useGlobalDataSourceStat: false
       connectionProperties: druid.stat.mergeSql=true;druid.stat.slowSqlMillis=1000;druid.stat.logSlowSql=true
-      url: jdbc:mysql://192.168.66.110:3306/kele-doc?useUnicode=true&characterEncoding=utf8&autoReconnect=true&allowMultiQueries=true
+      url: jdbc:mysql://localhost:13306/kele_doc?useUnicode=true&characterEncoding=utf8&autoReconnect=true&allowMultiQueries=true
       username: root
-      password: root123
+      password: Taeon@123
   redis:
-    host: 192.168.66.110
+    host: localhost
     port: 6379
     database: 0  # 默认数据库索引
     lettuce:

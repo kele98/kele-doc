@@ -27,4 +27,7 @@ public class UserInfoVO {
 
     @ApiModelProperty(value = "注册时间", example = "2024-01-01 10:10:10")
     private LocalDateTime createAt;
+
+    @ApiModelProperty(value = "角色: USER / ADMIN")
+    private String role;
 }

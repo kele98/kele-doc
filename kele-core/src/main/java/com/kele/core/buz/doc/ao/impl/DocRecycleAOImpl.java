@@ -15,10 +15,14 @@ import com.kele.core.buz.doc.model.vo.DocFileAndFolderResVO;
 import com.kele.core.buz.doc.model.vo.DocFileFolderResVO;
 import com.kele.core.buz.doc.model.vo.DocFileResVO;
 import com.kele.core.buz.doc.model.vo.DocRecycleReqVO;
+import com.kele.core.buz.doc.dao.mapper.DocFileFolderAclMapper;
+import com.kele.core.buz.doc.service.IDocFileContentStorageService;
 import com.kele.core.buz.doc.service.IDocFileFolderService;
 import com.kele.core.buz.doc.service.IDocRecycleService;
+import com.kele.core.buz.doc.service.IDocRelationLevelService;
 import com.kele.core.other.enums.DelStatusEnum;
 import com.kele.core.other.enums.FileFolderFormatEnum;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
@@ -31,11 +35,10 @@ import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
 
 /**
- * @author wuzhenhong
- * @date 2024/5/17 16:37
+ * v0.11 + v0.12 重构版。详见 spec §6.2 + §7.1.a。
  */
-@Service
 @Slf4j
+@Service
 public class DocRecycleAOImpl extends AbstractDocFileFolderAO implements DocRecycleAO {
 
     @Autowired
@@ -44,6 +47,18 @@ public class DocRecycleAOImpl extends AbstractDocFileFolderAO implements DocRecy
     @Autowired
     private IDocFileFolderService docFileFolderService;
 
+    @Autowired
+    private IDocRelationLevelService docRelationLevelService;
+
+    @Autowired
+    private IDocFileContentStorageService docFileContentStorageService;
+
+    @Autowired
+    private DocFileFolderAclMapper docFileFolderAclService;
+
+    /**
+     * v0.11 m7: getId → getFolderId
+     */
     @Override
     public DocFileAndFolderResVO getRecycleFolderAndFileList(String name) {
 
@@ -57,7 +72,8 @@ public class DocRecycleAOImpl extends AbstractDocFileFolderAO implements DocRecy
         if (CollectionUtils.isEmpty(docRecycleList)) {
             return docFileAndFolderResVO;
         }
-        List<Long> folderIdList = docRecycleList.stream().map(DocRecycle::getId).distinct()
+        // v0.11 m7: DocRecycle::getId → DocRecycle::getFolderId
+        List<Long> folderIdList = docRecycleList.stream().map(DocRecycle::getFolderId).distinct()
             .collect(Collectors.toList());
         List<DocFileFolder> folderList = docFileFolderService.listByIds(folderIdList);
 
@@ -76,21 +92,37 @@ public class DocRecycleAOImpl extends AbstractDocFileFolderAO implements DocRecy
         return docFileAndFolderResVO;
     }
 
+    /**
+     * v0.11 m7 + v0.12 重构：
+     * - line 87: getParentId, id → getParentId, docRecycle.getFolderId() (reqVO.getId() 是 recycle 记录 id)
+     * - line 116: 加 userId 防御性过滤
+     * - line 122: getId, id → getId, docRecycle.getFolderId()
+     * - 配合 Task 15：getRecycleById(id) 接受 recycleId
+     */
     @Override
     @ConcurrentLock(key = RedissonLockPrefixCons.RESTORE_FOLDER + "${reqVO.id}")
     public void restore(DocRecycleReqVO reqVO) {
-        Long id = reqVO.getId();
-        DocRecycle docRecycle = docRecycleService.getById(id);
-        if(Objects.isNull(docRecycle)) {
-            throw new BusinessException(ErrorCodeEnum.ERROR.getCode(), "该文件夹已被恢复请刷新列表！");
+        Long folderId = reqVO.getId();  // 前端传的是 folderId（文件/文件夹的业务 id）
+        Long userId = LoginContext.getUserId();
+        // 按 folderId + userId 查当前用户的 recycle 记录
+        DocRecycle docRecycleRecord = docRecycleService.getOne(Wrappers.<DocRecycle>lambdaQuery()
+            .eq(DocRecycle::getFolderId, folderId)
+            .eq(DocRecycle::getUserId, userId));
+        if (Objects.isNull(docRecycleRecord)) {
+            throw new BusinessException(ErrorCodeEnum.RESOURCE_NOT_VISIBLE.getCode(), "该文件夹已被恢复请刷新列表！");
         }
-        List<DocRelationLevel> levelList = docRelationLevelService.lambdaQuery().eq(DocRelationLevel::getParentId, id)
+        Long recycleId = docRecycleRecord.getId();
+        List<DocRelationLevel> levelList = docRelationLevelService.lambdaQuery()
+            .eq(DocRelationLevel::getParentId, folderId)
             .list();
         if(CollectionUtils.isEmpty(levelList)) {
-            log.error("id为{}的文件数据恢复异常", id);
+            log.error("folderId为{}的文件数据恢复异常", folderId);
             throw new BusinessException(ErrorCodeEnum.ERROR.getCode(), "数据恢复异常，请联系管理员！");
         }
-        DocFileFolder docFileFolder = this.getRecycleById(id);
+        DocFileFolder docFileFolder = docFileFolderService.getById(folderId);
+        if (Objects.isNull(docFileFolder)) {
+            throw new BusinessException(ErrorCodeEnum.ERROR.getCode(), "该文件不存在或已被删除！");
+        }
         // 检查父级是否被删除，如果被删除，找到其上未被删除的父级，挂在下面
         Long parentId = docFileFolder.getParentId();
         while(Objects.nonNull(parentId) && parentId != 0L) {
@@ -108,18 +140,17 @@ public class DocRecycleAOImpl extends AbstractDocFileFolderAO implements DocRecy
         List<Long> childIds = levelList.stream().map(DocRelationLevel::getSonId).collect(Collectors.toList());
         List<Long> relationLevelIds = levelList.stream().map(DocRelationLevel::getId).collect(Collectors.toList());
         transactionTemplate.execute(status -> {
-           docFileFolderService.update(Wrappers.<DocFileFolder>lambdaUpdate()
-               .in(DocFileFolder::getId, childIds)
-               .set(DocFileFolder::getStatus, DelStatusEnum.NORMAL.getStatus()));
-           docRecycleService.remove(Wrappers.<DocRecycle>lambdaQuery()
-               .eq(DocRecycle::getUserId, docFileFolder.getCreatorId())
-               .eq(DocRecycle::getId, id));
-           docRelationLevelService.removeBatchByIds(relationLevelIds);
+            // 删 recycle 记录（即"恢复"：文件 status 恒为 1，删掉 recycle 标记即可）
+            docRecycleService.remove(Wrappers.<DocRecycle>lambdaQuery()
+                .eq(DocRecycle::getUserId, userId)
+                .eq(DocRecycle::getId, recycleId));
+            docRelationLevelService.removeBatchByIds(relationLevelIds);
             Integer format = docFileFolder.getFormat();
             if(!Objects.equals(finalParentId, docFileFolder.getParentId())) {
+                // v0.12: getId, id → getId, docRecycle.getFolderId()
                 docFileFolderService.update(Wrappers.<DocFileFolder>lambdaUpdate()
                     .set(DocFileFolder::getParentId, finalParentId)
-                    .eq(DocFileFolder::getId, id));
+                    .eq(DocFileFolder::getId, folderId));
             }
             if(Objects.nonNull(finalParentId) && finalParentId > 0L) {
                 if(FileFolderFormatEnum.FOLDER.getFormat().equals(format)) {
@@ -131,41 +162,69 @@ public class DocRecycleAOImpl extends AbstractDocFileFolderAO implements DocRecy
             }
             return null;
         });
-
     }
 
+    /**
+     * v0.11 m7 重构：getRecycleById(recycleId) 而非 folderId
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void completelyDelete(DocRecycleReqVO reqVO) {
-        Long id = reqVO.getId();
-        this.getRecycleById(id);
-        docRecycleService.removeById(id);
-        docRelationLevelService.remove(Wrappers.<DocRelationLevel>lambdaQuery()
-            .eq(DocRelationLevel::getParentId, id));
+        Long folderId = reqVO.getId();  // 前端传的是 folderId
+        Long userId = LoginContext.getUserId();
+        DocRecycle docRecycleRecord = docRecycleService.getOne(Wrappers.<DocRecycle>lambdaQuery()
+            .eq(DocRecycle::getFolderId, folderId)
+            .eq(DocRecycle::getUserId, userId));
+        if (Objects.isNull(docRecycleRecord)) {
+            throw new BusinessException(ErrorCodeEnum.RESOURCE_NOT_VISIBLE.getCode(), "回收记录不存在或已清空");
+        }
+        Long recycleId = docRecycleRecord.getId();
+        transactionTemplate.execute(status -> {
+            // 硬删 ACL
+            docFileFolderAclService.delete(Wrappers.<com.kele.core.buz.doc.dao.entity.DocFileFolderAcl>lambdaQuery()
+                .eq(com.kele.core.buz.doc.dao.entity.DocFileFolderAcl::getFolderId, folderId));
+            // 硬删 doc_file_folder
+            docFileFolderService.removeById(folderId);
+            // 删 recycle 记录
+            docRecycleService.removeById(recycleId);
+            // 删关联层级
+            docRelationLevelService.remove(Wrappers.<DocRelationLevel>lambdaQuery()
+                .eq(DocRelationLevel::getParentId, folderId));
+            return null;
+        });
     }
 
+    /**
+     * v0.12 MAJOR: 整方法重构。详见 spec §7 表格"清空回收站"行。
+     * 收集当前用户所有 recycle 记录 → 单事务批量硬删 folder + ACL + content + recycle + relation_level
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void emptyRecycle() {
         Long userId = LoginContext.getUserId();
-        docRecycleService.remove(Wrappers.<DocRecycle>lambdaQuery()
-            .eq(DocRecycle::getUserId, userId));
-        docRelationLevelService.remove(Wrappers.<DocRelationLevel>lambdaQuery()
-            .eq(DocRelationLevel::getUserId, userId));
-    }
-
-    private DocFileFolder getRecycleById(Long id) {
-        DocFileFolder docFileFolder = docFileFolderService.getById(id);
-        if(Objects.isNull(docFileFolder)) {
-            throw new BusinessException(ErrorCodeEnum.ERROR.getCode(), "该文件不存在或已被删除！");
+        // 1. 收集所有 folder_id
+        List<DocRecycle> docRecycleList = docRecycleService.lambdaQuery()
+            .eq(DocRecycle::getUserId, userId).list();
+        if (CollectionUtils.isEmpty(docRecycleList)) {
+            return;
         }
-        Long userId = LoginContext.getUserId();
-        if(!docFileFolder.getCreatorId().equals(userId)) {
-            throw new BusinessException(ErrorCodeEnum.ERROR.getCode(), "禁止访问");
-        }
-        if(DelStatusEnum.NORMAL.getStatus().equals(docFileFolder.getStatus())) {
-            throw new BusinessException(ErrorCodeEnum.ERROR.getCode(), "该文件未被删除，无需重复恢复");
-        }
-        return docFileFolder;
+        List<Long> folderIds = docRecycleList.stream()
+            .map(DocRecycle::getFolderId).collect(Collectors.toList());
+        // 2. 单事务批量硬删
+        transactionTemplate.execute(status -> {
+            // 删 doc_file_folder_acl
+            docFileFolderAclService.delete(Wrappers.<com.kele.core.buz.doc.dao.entity.DocFileFolderAcl>lambdaQuery()
+                .in(com.kele.core.buz.doc.dao.entity.DocFileFolderAcl::getFolderId, folderIds));
+            // 删 doc_file_folder（含子文件夹；调用方若有需要可单 SQL 删除子树）
+            docFileFolderService.remove(Wrappers.<DocFileFolder>lambdaQuery()
+                .in(DocFileFolder::getId, folderIds));
+            // 删 recycle 行（仅当前用户）
+            docRecycleService.remove(Wrappers.<DocRecycle>lambdaQuery()
+                .eq(DocRecycle::getUserId, userId));
+            // 删 relation_level
+            docRelationLevelService.remove(Wrappers.<DocRelationLevel>lambdaQuery()
+                .in(DocRelationLevel::getParentId, folderIds));
+            return null;
+        });
     }
 }

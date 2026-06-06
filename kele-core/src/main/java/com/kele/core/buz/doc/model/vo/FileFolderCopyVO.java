@@ -13,12 +13,12 @@ import lombok.Data;
 @ApiModel(value = "文件夹复制VO")
 public class FileFolderCopyVO {
 
-    @ApiModelProperty(value = "文件夹id")
-    @NotNull(message = "id必传")
+    @ApiModelProperty(value = "源文件夹id（要复制的）")
+    @NotNull(message = "id必传（源文件夹id）")
     private Long id;
 
-    @ApiModelProperty(value = "文件夹id")
-    @NotNull(message = "folderId必传")
+    @ApiModelProperty(value = "目标父文件夹id（复制到哪）")
+    @NotNull(message = "folderId必传（目标父文件夹id）")
     private Long folderId;
 
 }

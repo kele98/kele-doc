@@ -32,8 +32,7 @@ import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
 
 /**
- * @author wuzhenhong
- * @date 2024/5/15 16:29
+ * v0.11 + v0.12 重构版。详见 spec §6.2 该文件 5 处条目。
  */
 @Slf4j
 @Service
@@ -49,16 +48,21 @@ public class DocFileContentAOImpl extends AbstractDocFileFolderAO implements Doc
         return docFileContentStorageService.getFileContent(docFileFolder);
     }
 
+    /**
+     * v0.11 B1: 加 setOwnerId
+     */
     @Override
     public DocFileContentResVO createFile(DocFileCreateReqVO createReqVO) {
 
         DocFileFolder parent = super.getById(createReqVO.getFolderId());
         if (Objects.isNull(parent)) {
-            throw new BusinessException(ErrorCodeEnum.ERROR.getCode(), "父文件夹不存在！");
+            throw new BusinessException(ErrorCodeEnum.RESOURCE_NOT_VISIBLE.getCode(), "父文件夹不存在或无权访问");
         }
         if (FileFolderFormatEnum.FILE.getFormat().equals(parent.getFormat())) {
             throw new BusinessException(ErrorCodeEnum.ERROR.getCode(), "只能在文件夹下创建文件");
         }
+        // 创建文件需对父 WRITE（v0.7 §5.4.a 隐含）
+        permissionService.requireWrite(createReqVO.getFolderId());
         DocFileFolder fileFolder = new DocFileFolder();
         fileFolder.setParentId(createReqVO.getFolderId());
         fileFolder.setName(createReqVO.getName());
@@ -69,21 +73,20 @@ public class DocFileContentAOImpl extends AbstractDocFileFolderAO implements Doc
         fileFolder.setCollected(false);
         fileFolder.setImg(null);
         fileFolder.setVersion(0);
-        fileFolder.setCreatorId(LoginContext.getUserId());
+        Long currentUserId = LoginContext.getUserId();
+        fileFolder.setCreatorId(currentUserId);
+        fileFolder.setOwnerId(currentUserId);  // v0.11 B1: 创建者 = Owner
         fileFolder.setCreateAt(LocalDateTime.now());
         fileFolder.setUpdateAt(LocalDateTime.now());
-        // 先置为无效状态（防止后续操作失败，导致页面看到错误的数据）
+        // 先置为无效状态
         fileFolder.setStatus(DelStatusEnum.DISPLAY.getStatus());
-        // 先保存元数据（目前我们文件id是通过mysql的自增id生成的，所以选择先保存）
         boolean saveSuccess = docFileFolderService.save(fileFolder);
         if(!saveSuccess) {
             throw new BusinessException(ErrorCodeEnum.ERROR.getCode(), "文档保存失败！原因=》文件元数据保存失败！");
         }
 
-        // 保存文档内容
         boolean success = docFileContentStorageService.create(fileFolder, () ->
             transactionTemplate.execute(status -> {
-                // 保存成功之后将文件置为生效状态
                 boolean statusUpdate = docFileFolderService.lambdaUpdate()
                     .set(DocFileFolder::getStatus, DelStatusEnum.NORMAL.getStatus())
                     .eq(DocFileFolder::getId, fileFolder.getId())
@@ -115,7 +118,7 @@ public class DocFileContentAOImpl extends AbstractDocFileFolderAO implements Doc
     @ConcurrentLock(key = "com.kele.core.doc.ao.impl.DocFileContentAOImpl.updateFile(${updateReqVO.id})")
     public void updateFile(DocFileUpdateReqVO updateReqVO) {
         Long fileId = updateReqVO.getId();
-        // 校验
+        permissionService.requireWrite(fileId);
         DocFileFolder fileFolder = super.getById(fileId);
         DocFileFolder updateFolder = new DocFileFolder();
         updateFolder.setId(fileFolder.getId());
@@ -137,10 +140,7 @@ public class DocFileContentAOImpl extends AbstractDocFileFolderAO implements Doc
         if(!success) {
             throw new BusinessException(ErrorCodeEnum.ERROR.getCode(), "文档内容更新失败！");
         }
-        // 删除老的封面附件
         try {
-            // 删除老的封面图片不是必须的步骤，即使出错也不要影响主流程
-            // 如果出错可以通过发送邮件等报错信息去提示管理员处理
             String oldImg = fileFolder.getImg();
             String newImg = updateReqVO.getImg();
             if (StringUtils.hasText(oldImg)
@@ -153,19 +153,37 @@ public class DocFileContentAOImpl extends AbstractDocFileFolderAO implements Doc
         }
     }
 
+    /**
+     * v0.11 B1 + owner-only：源和目标文件夹必须都是当前用户的（owner）。
+     * 分享文件夹内的文件，即使有 MANAGE 权限也不允许移出。
+     */
     @Override
     public void moveFile(DocFileMoveReqVO reqVO) {
 
         Long newFolderId = reqVO.getNewFolderId();
-        DocFileFolder parent = super.getById(newFolderId);
-        if (Objects.isNull(parent)) {
-            throw new BusinessException(ErrorCodeEnum.ERROR.getCode(), "目标文件夹不存在！");
+        Long userId = LoginContext.getUserId();
+
+        // 目标文件夹必须是自己的
+        DocFileFolder targetFolder = super.getById(newFolderId);
+        if (Objects.isNull(targetFolder)) {
+            throw new BusinessException(ErrorCodeEnum.RESOURCE_NOT_VISIBLE.getCode(), "目标文件夹不存在！");
         }
-        if (FileFolderFormatEnum.FILE.getFormat().equals(parent.getFormat())) {
+        if (!userId.equals(targetFolder.getOwnerId())) {
+            throw new BusinessException(ErrorCodeEnum.PERMISSION_DENIED.getCode(), "只能移动到自己的文件夹下");
+        }
+        if (FileFolderFormatEnum.FILE.getFormat().equals(targetFolder.getFormat())) {
             throw new BusinessException(ErrorCodeEnum.ERROR.getCode(), "只能迁移到文件夹下！");
         }
+        // 源文件的父文件夹必须是自己的
+        for (Long id : reqVO.getIds()) {
+            DocFileFolder file = super.getById(id);
+            if (Objects.isNull(file) || !userId.equals(file.getOwnerId())) {
+                throw new BusinessException(ErrorCodeEnum.PERMISSION_DENIED.getCode(), "只能移动自己的文件");
+            }
+        }
+
         List<Long> idList = reqVO.getIds();
-        List<DocFileFolder> fileFolders = super.selectByIdList(idList);
+        List<DocFileFolder> fileFolders = super.selectByIdList(idList);  // 已被 Task 15 改造为走 PermissionService
         List<String> checkFileNames = fileFolders.stream().filter(e -> e.getParentId().equals(newFolderId))
             .map(DocFileFolder::getName)
             .collect(Collectors.toList());
@@ -199,23 +217,34 @@ public class DocFileContentAOImpl extends AbstractDocFileFolderAO implements Doc
         });
     }
 
+    /**
+     * v0.11 B1: 源 READ + 目标父 MANAGE（v0.7 §5.4.a 文件级）
+     */
     @Override
     public void copyFile(DocFileCopyReqVO reqVO) {
 
         Long newFolderId = reqVO.getNewFolderId();
         DocFileFolder parent = super.getById(newFolderId);
         if (Objects.isNull(parent)) {
-            throw new BusinessException(ErrorCodeEnum.ERROR.getCode(), "目标文件夹不存在！");
+            throw new BusinessException(ErrorCodeEnum.RESOURCE_NOT_VISIBLE.getCode(), "目标文件夹不存在！");
         }
         if (FileFolderFormatEnum.FILE.getFormat().equals(parent.getFormat())) {
             throw new BusinessException(ErrorCodeEnum.ERROR.getCode(), "只能复制到文件夹下！");
         }
+        // 源文件 READ 校验
+        for (Long id : reqVO.getIds()) {
+            permissionService.requireRead(id);
+        }
+        // 目标父 MANAGE 校验（v0.7 §5.4.a 文件级 MANAGE）
+        permissionService.requireManage(newFolderId);
+
         List<Long> originIdList = reqVO.getIds();
         List<DocFileFolder> fileFolders = super.selectByIdList(originIdList);
         if (CollectionUtils.isEmpty(fileFolders)) {
             return;
         }
         LocalDateTime currentLdt = LocalDateTime.now();
+        Long userId = LoginContext.getUserId();
         fileFolders.forEach(e -> {
             e.setOldId(e.getId());
             e.setId(null);
@@ -225,17 +254,16 @@ public class DocFileContentAOImpl extends AbstractDocFileFolderAO implements Doc
             e.setParentId(reqVO.getNewFolderId());
             e.setOldVersion(e.getVersion());
             e.setVersion(0);
-            // 新增文件先置为失效，暂时不可见（防止后续操作失败，导致页面看到错误的数据）
+            e.setCreatorId(userId);
+            e.setOwnerId(userId);  // v0.7: 复制者 = 新 Owner
             e.setStatus(DelStatusEnum.DISPLAY.getStatus());
         });
-        // 批量保存复制的文件（目前我们文件id是通过mysql的自增id生成的，所以选择先保存）
         boolean saveSuccess = docFileFolderService.saveBatch(fileFolders);
         if(!saveSuccess) {
             throw new BusinessException(ErrorCodeEnum.ERROR.getCode(), "文档复制失败！");
         }
         boolean success = docFileContentStorageService.copy(fileFolders, () -> {
             return transactionTemplate.execute(status -> {
-                // 复制成功之后，将文件置为失效
                 boolean updateStatusResult = docFileFolderService.lambdaUpdate()
                     .set(DocFileFolder::getStatus, DelStatusEnum.NORMAL.getStatus())
                     .in(DocFileFolder::getId, fileFolders.stream().map(DocFileFolder::getId)
@@ -256,10 +284,18 @@ public class DocFileContentAOImpl extends AbstractDocFileFolderAO implements Doc
         }
     }
 
+    /**
+     * v0.10 + v0.11 B5 重构：
+     * - 删 .set(DocFileFolder::getStatus, DelStatusEnum.DEL.getStatus()) 整段（v0.7 §7.1.a status 恒为 1）
+     * - docRecycle.setId(e.getId()) → docRecycle.setFolderId(e.getId())
+     */
     @Override
     public void deleteFile(DocFileDelReqVO reqVO) {
 
         List<Long> idList = reqVO.getIds();
+        for (Long id : idList) {
+            permissionService.requireManage(id);
+        }
         List<DocFileFolder> fileFolders = super.selectByIdList(idList);
         Map<Long, Integer> parentIdMapSizeMap = fileFolders.stream()
             .filter(e -> Objects.nonNull(e.getParentId()) && e.getParentId() > 0L)
@@ -275,7 +311,7 @@ public class DocFileContentAOImpl extends AbstractDocFileFolderAO implements Doc
         Long userId = LoginContext.getUserId();
         List<DocRecycle> docRecycleList = fileFolders.stream().map(e -> {
             DocRecycle docRecycle = new DocRecycle();
-            docRecycle.setId(e.getId());
+            docRecycle.setFolderId(e.getId());  // v0.11 B5: setId → setFolderId
             docRecycle.setIdList(Collections.singletonList(e.getId()));
             docRecycle.setName(e.getName());
             docRecycle.setUserId(userId);
@@ -283,13 +319,8 @@ public class DocFileContentAOImpl extends AbstractDocFileFolderAO implements Doc
             return docRecycle;
         }).collect(Collectors.toList());
         transactionTemplate.execute(status -> {
-            docFileFolderService.update(Wrappers.<DocFileFolder>lambdaUpdate()
-                .in(DocFileFolder::getId, idList)
-                .set(DocFileFolder::getStatus, DelStatusEnum.DEL.getStatus()));
-//            docFileContentService.update(Wrappers.<DocFileContent>lambdaUpdate()
-//                .in(DocFileContent::getFileId, idList)
-//                .set(DocFileContent::getStatus, DelStatusEnum.DEL.getStatus()));
-            // 扔回收站
+            // v0.10 B5: 删整段 .set(DocFileFolder::getStatus, DelStatusEnum.DEL.getStatus())
+            // status 保持 1 不变
             docRecycleService.saveBatch(docRecycleList);
             super.saveRecycleLevel(docRecycleList);
             if (!CollectionUtils.isEmpty(updateOldFolderList)) {
@@ -305,8 +336,12 @@ public class DocFileContentAOImpl extends AbstractDocFileFolderAO implements Doc
         docFileContentStorageService.downloadFileContent(docFileFolder, response);
     }
 
+    /**
+     * v0.12 MINOR: 加 requireRead 鉴权
+     */
     @Override
     public DocFileContentResVO getFileBaseInfo(Long id) {
+        permissionService.requireRead(id);  // v0.12: 加鉴权
         DocFileFolder docFileFolder = docFileFolderService.getById(id);
         DocFileContentResVO resVO = new DocFileContentResVO();
         resVO.setId(id);

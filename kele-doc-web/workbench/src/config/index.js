@@ -4,7 +4,7 @@ export default {
   // logo
   logo: logoUrl,
   // 名称
-  name: 'kele-doc',
+  name: '可乐文档',
   // 可创建的文件类型
   createTypeList: [
     {

@@ -18,4 +18,9 @@ public class UserInfoBO {
      * 账号
      */
     private String account;
+
+    /**
+     * 角色，USER=普通用户，ADMIN=管理员
+     */
+    private String role;
 }

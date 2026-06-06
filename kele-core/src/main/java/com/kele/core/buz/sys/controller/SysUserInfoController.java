@@ -1,21 +1,34 @@
 package com.kele.core.buz.sys.controller;
 
 
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.kele.common.model.ResponseResult;
 import com.kele.core.buz.sys.ao.SysUserInfoAO;
+import com.kele.core.buz.sys.dao.entity.SysUserInfo;
+import com.kele.core.buz.sys.dao.mapper.SysUserInfoMapper;
 import com.kele.core.buz.sys.model.vo.UserInfoUpdateVO;
 import com.kele.core.buz.sys.model.vo.UserInfoVO;
+import com.kele.core.buz.sys.model.vo.UserListVO;
 import com.kele.core.buz.sys.model.vo.UserLoginVO;
 import com.kele.core.buz.sys.model.vo.UserPwdModifyVO;
 import com.kele.core.buz.sys.model.vo.UserRegisterVO;
+import com.kele.core.buz.sys.model.vo.UserSearchVO;
+import com.kele.core.buz.sys.service.ISysUserInfoService;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.util.StringUtils;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -32,6 +45,12 @@ public class SysUserInfoController {
 
     @Autowired
     private SysUserInfoAO sysUserInfoAO;
+
+    @Autowired
+    private SysUserInfoMapper sysUserInfoMapper;
+
+    @Autowired
+    private ISysUserInfoService sysUserInfoService;
 
     @PostMapping("/register")
     public ResponseResult<Void> register(@RequestBody @Validated UserRegisterVO userRegisterVO) {
@@ -67,6 +86,111 @@ public class SysUserInfoController {
     public ResponseResult<Void> changePassword(@RequestBody UserPwdModifyVO userPwdModifyVO) {
         sysUserInfoAO.changePassword(userPwdModifyVO);
         return ResponseResult.ok();
+    }
+
+    /**
+     * 管理员用户列表（含角色、状态，分页）。
+     */
+    @GetMapping("/admin/users")
+    public ResponseResult<UserListVO> adminUserList(
+            @RequestParam(value = "keyword", defaultValue = "") String keyword,
+            @RequestParam(value = "page", defaultValue = "1") int page,
+            @RequestParam(value = "size", defaultValue = "20") int size) {
+        if (size <= 0) size = 20;
+        if (size > 100) size = 100;
+        if (page < 1) page = 1;
+        com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<SysUserInfo> wrapper =
+                Wrappers.<SysUserInfo>lambdaQuery().ne(SysUserInfo::getStatus, -1);
+        if (StringUtils.hasText(keyword)) {
+            wrapper.and(w -> w.like(SysUserInfo::getAccount, keyword)
+                              .or().like(SysUserInfo::getUserName, keyword));
+        }
+        Long total = sysUserInfoMapper.selectCount(wrapper);
+        List<UserSearchVO> records = sysUserInfoMapper.selectList(
+                    wrapper.orderByDesc(SysUserInfo::getId)
+                           .last("LIMIT " + size + " OFFSET " + (page - 1) * size)
+            ).stream().map(u -> new UserSearchVO(
+                    u.getId(), u.getAccount(), u.getUserName(), u.getAvatar(),
+                    u.getRole(), u.getStatus(), u.getCreateAt()))
+            .collect(Collectors.toList());
+        return ResponseResult.ok(new UserListVO(records, total.intValue(), page, size));
+    }
+
+    /**
+     * 管理员：修改用户状态（启用/禁用）。
+     */
+    @PostMapping("/admin/users/{id}/status")
+    public ResponseResult<Void> updateUserStatus(
+            @PathVariable("id") Long id,
+            @RequestBody Map<String, Integer> body) {
+        Integer status = body.get("status");
+        if (status == null || (status != 0 && status != 1)) {
+            return ResponseResult.fail("status 必须为 0（正常）或 1（禁用）");
+        }
+        SysUserInfo target = sysUserInfoService.getById(id);
+        if (target == null) {
+            return ResponseResult.fail("用户不存在");
+        }
+        if ("admin".equals(target.getAccount())) {
+            return ResponseResult.fail("不允许操作超级管理员");
+        }
+        SysUserInfo update = new SysUserInfo();
+        update.setId(id);
+        update.setStatus(status);
+        sysUserInfoService.updateById(update);
+        return ResponseResult.ok();
+    }
+
+    /**
+     * 管理员：修改用户角色。
+     */
+    @PostMapping("/admin/users/{id}/role")
+    public ResponseResult<Void> updateUserRole(
+            @PathVariable("id") Long id,
+            @RequestBody Map<String, String> body) {
+        String role = body.get("role");
+        if (!"USER".equals(role) && !"ADMIN".equals(role)) {
+            return ResponseResult.fail("role 必须为 USER 或 ADMIN");
+        }
+        SysUserInfo target = sysUserInfoService.getById(id);
+        if (target == null) {
+            return ResponseResult.fail("用户不存在");
+        }
+        if ("admin".equals(target.getAccount())) {
+            return ResponseResult.fail("不允许操作超级管理员");
+        }
+        SysUserInfo update = new SysUserInfo();
+        update.setId(id);
+        update.setRole(role);
+        sysUserInfoService.updateById(update);
+        return ResponseResult.ok();
+    }
+
+    /**
+     * v0.7 §4.1.1：用户搜索。任意登录用户可用（ShareDialog 用）。
+     * - 按 username / nickname 模糊匹配
+     * - 排除已注销 (status=-1)
+     * - limit 限 ≤ 50
+     * - 仅返 id / account / nickname / avatar（不返敏感字段）
+     */
+    @GetMapping("/users/search")
+    public ResponseResult<List<UserSearchVO>> searchUsers(
+            @RequestParam("keyword") String keyword,
+            @RequestParam(value = "limit", defaultValue = "20") Integer limit) {
+        if (limit == null || limit <= 0) limit = 20;
+        if (limit > 50) limit = 50;
+        com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<SysUserInfo> searchWrapper =
+                Wrappers.<SysUserInfo>lambdaQuery().ne(SysUserInfo::getStatus, -1);
+        if (StringUtils.hasText(keyword)) {
+            searchWrapper.and(w -> w.like(SysUserInfo::getAccount, keyword)
+                                     .or().like(SysUserInfo::getUserName, keyword));
+        }
+        List<UserSearchVO> results = sysUserInfoMapper.selectList(
+                    searchWrapper.last("LIMIT " + limit)
+            ).stream().map(u -> new UserSearchVO(
+                    u.getId(), u.getAccount(), u.getUserName(), u.getAvatar()))
+            .collect(Collectors.toList());
+        return ResponseResult.ok(results);
     }
 
 }

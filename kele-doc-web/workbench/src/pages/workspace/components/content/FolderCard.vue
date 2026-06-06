@@ -82,6 +82,11 @@ const menuList = computed(() => {
           icon: 'icon-a-yidong2'
         },
         {
+          name: '分享',
+          value: 'share',
+          elIcon: 'Share'
+        },
+        {
           name: '删除',
           value: 'delete',
           icon: 'icon-shanchu'

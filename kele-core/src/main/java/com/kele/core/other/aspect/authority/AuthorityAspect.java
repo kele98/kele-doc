@@ -3,13 +3,13 @@ package com.kele.core.other.aspect.authority;
 import com.kele.common.enums.ErrorCodeEnum;
 import com.kele.common.exception.BusinessException;
 import com.kele.core.other.context.LoginContext;
-import com.kele.core.other.util.ongl.OnglUtils;
 import java.lang.reflect.Method;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.ibatis.ognl.Ognl;
 import org.apache.ibatis.ognl.OgnlException;
 import org.aspectj.lang.JoinPoint;
 import org.aspectj.lang.annotation.Aspect;
@@ -51,19 +51,31 @@ public class AuthorityAspect implements ApplicationContextAware {
         String[] parameterNames = methodSignature.getParameterNames();
         Authority authority = method.getAnnotation(Authority.class);
 
-        String[] spelArgs = authority.spelArgs();
+        // v0.7 落实 spec §10.7: 优先用 expressionArgs（新字段），fallback 到 spelArgs（已 @Deprecated）
+        String[] expressionArgs = authority.expressionArgs();
+        if (expressionArgs == null || expressionArgs.length == 0) {
+            expressionArgs = authority.spelArgs();
+        }
         Object[] finalArgs = EMPTY_ARRAY;
-        if (Objects.nonNull(spelArgs) && spelArgs.length > 0) {
+        if (Objects.nonNull(expressionArgs) && expressionArgs.length > 0) {
             Map<String, Object> context = new HashMap<>();
             for (int i = 0; i < parameters.length; i++) {
                 context.put(parameterNames[i], parameters[i]);
             }
             context.put("userInfoBO", LoginContext.getUserInfo());
-            finalArgs = Arrays.stream(spelArgs).map(args -> {
+            finalArgs = Arrays.stream(expressionArgs).map(args -> {
                     try {
-                        return OnglUtils.evaluate(args, context);
+                        // 去掉 OGNL 表达式的 # 前缀（#folderId → folderId），让 2-arg
+                        // Ognl.getValue(String, Object) 在 root=contextMap 上走 Map property
+                        // access（等价于 context.get("folderId")）。
+                        // 不要用 OnglUtils.evaluate：那是 ${...} 模板引擎，对裸 #folderId 不识别，
+                        // 会返回空串导致 findMethod 拿到 null 抛 NPE（v0.7 回归）。
+                        // mybatis-ognl 的 Ognl.getValue 没有 (String, Map, Object) 这种
+                        // standalone OGNL 才有的 context+root 双参数重载。
+                        String ognlExpr = args.startsWith("#") ? args.substring(1) : args;
+                        return Ognl.getValue(ognlExpr, context);
                     } catch (OgnlException e) {
-                        throw new BusinessException(ErrorCodeEnum.ERROR.getCode(), "ongl表达式解析失败！", e);
+                        throw new BusinessException(ErrorCodeEnum.ERROR.getCode(), "ognl表达式解析失败！", e);
                     }
                 })
                 .toArray();
@@ -71,7 +83,11 @@ public class AuthorityAspect implements ApplicationContextAware {
 
         String beanName = authority.beanName();
         Object bean = this.applicationContext.getBean(beanName);
-        Class<?>[] classes = (Class<?>[]) Arrays.stream(finalArgs).map(Object::getClass).toArray();
+        // v0.7 修复：原 (Class<?>[]) cast 在 Java 数组类型系统下永远抛 ClassCastException
+        // 改用 typed generator toArray(IntFunction) 直接生成 Class<?>[] 数组，绕过强制 cast
+        Class<?>[] classes = Arrays.stream(finalArgs)
+            .map(Object::getClass)
+            .toArray(Class<?>[]::new);
         Method method1 = ReflectionUtils.findMethod(bean.getClass(), authority.methodName(), classes);
         assert method1 != null;
         return method1.invoke(bean, finalArgs);

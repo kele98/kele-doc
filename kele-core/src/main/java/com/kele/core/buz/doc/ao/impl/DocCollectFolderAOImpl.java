@@ -9,16 +9,17 @@ import com.kele.core.buz.doc.dao.entity.DocFileFolder;
 import com.kele.core.buz.doc.model.vo.DocCollectReqVO;
 import com.kele.core.buz.doc.model.vo.DocFileResVO;
 import com.kele.core.buz.doc.service.IDocFileFolderService;
+import com.kele.core.buz.doc.permission.PermissionService;
 import com.kele.core.other.enums.DelStatusEnum;
 import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 /**
- * @author wuzhenhong
- * @date 2024/5/17 15:53
+ * v0.11 + v0.12 重构版。详见 spec §6.2 该文件 2 处条目。
  */
 @Service
 public class DocCollectFolderAOImpl implements DocCollectFolderAO {
@@ -29,14 +30,35 @@ public class DocCollectFolderAOImpl implements DocCollectFolderAO {
     @Autowired
     private IDocFileFolderService docFileFolderService;
 
+    @Autowired
+    private PermissionService permissionService;
+
+    /**
+     * v0.11 B1: 删 creatorId 硬编码过滤；v0.7 §7.1 排除回收站
+     */
     @Override
     public List<DocFileResVO> getCollectFileList(String name) {
         Long userId = LoginContext.getUserId();
         return docFileFolderService.list(Wrappers.<DocFileFolder>lambdaQuery()
-            .eq(DocFileFolder::getCreatorId, userId)
-            .like(DocFileFolder::getName, name)
             .eq(DocFileFolder::getCollected, true)
-            .eq(DocFileFolder::getStatus, DelStatusEnum.NORMAL.getStatus()))
+            .eq(DocFileFolder::getStatus, DelStatusEnum.NORMAL.getStatus())
+            .and(w -> w
+                // 我 owner 的可见
+                .eq(DocFileFolder::getOwnerId, userId)
+                // 或我通过 ACL 可见（USER / ORG / GROUP 命中）
+                .or().in(DocFileFolder::getId, Wrappers.<com.kele.core.buz.doc.dao.entity.DocFileFolderAcl>lambdaQuery()
+                    .select(com.kele.core.buz.doc.dao.entity.DocFileFolderAcl::getFolderId)
+                    .isNull(com.kele.core.buz.doc.dao.entity.DocFileFolderAcl::getRevokedAt)
+                    .and(a -> a.eq(com.kele.core.buz.doc.dao.entity.DocFileFolderAcl::getPrincipalType, "USER")
+                        .eq(com.kele.core.buz.doc.dao.entity.DocFileFolderAcl::getPrincipalId, userId)
+                        .or().eq(com.kele.core.buz.doc.dao.entity.DocFileFolderAcl::getPrincipalType, "ORG")
+                        .or().in(com.kele.core.buz.doc.dao.entity.DocFileFolderAcl::getPrincipalId,
+                            LoginContext.getUserGroupIds()))))
+            .like(StringUtils.hasText(name), DocFileFolder::getName, name)
+            // 排除当前用户软删的（v0.7）
+            .notIn(DocFileFolder::getId, Wrappers.<com.kele.core.buz.doc.dao.entity.DocRecycle>lambdaQuery()
+                .eq(com.kele.core.buz.doc.dao.entity.DocRecycle::getUserId, userId)
+                .select(com.kele.core.buz.doc.dao.entity.DocRecycle::getFolderId)))
             .stream().map(fileFolder -> {
                 DocFileResVO resVO = new DocFileResVO();
                 resVO.setId(fileFolder.getId());
@@ -69,18 +91,10 @@ public class DocCollectFolderAOImpl implements DocCollectFolderAO {
     }
 
     /**
-     * 校验当前用户是否有权限操作该文件
-     *
-     * @param fileId 文件ID
+     * v0.11 B1: 删 creatorId 硬编码，改 permissionService.requireRead
      */
     private void checkFilePermission(Long fileId) {
-        DocFileFolder fileFolder = docFileFolderService.getById(fileId);
-        if (Objects.isNull(fileFolder)) {
-            throw new BusinessException(ErrorCodeEnum.ERROR.getCode(), FILE_NOT_EXIST_MSG);
-        }
-        Long userId = LoginContext.getUserId();
-        if (!fileFolder.getCreatorId().equals(userId)) {
-            throw new BusinessException(ErrorCodeEnum.ERROR.getCode(), NO_PERMISSION_MSG);
-        }
+        // requireRead 内部已做存在性 + READ 权限双重校验（PermissionService.resolve）
+        permissionService.requireRead(fileId);
     }
 }

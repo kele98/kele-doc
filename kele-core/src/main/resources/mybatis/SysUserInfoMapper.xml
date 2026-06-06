@@ -12,5 +12,6 @@
     <result column="version" property="version"/>
     <result column="update_at" property="updateAt"/>
     <result column="status" property="status"/>
+    <result column="role" property="role"/>
   </resultMap>
 </mapper>

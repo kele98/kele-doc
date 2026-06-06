@@ -56,9 +56,6 @@ public class DocFileFolder implements Serializable {
     @ApiModelProperty(value = "是否被收藏，0：否，1：是")
     private Boolean collected;
 
-    @ApiModelProperty(value = "是否公开")
-    private Boolean isPublic;
-
     @ApiModelProperty(value = "封面图")
     private String img;
 
@@ -67,6 +64,9 @@ public class DocFileFolder implements Serializable {
 
     @ApiModelProperty(value = "创建人ID")
     private Long creatorId;
+
+    @ApiModelProperty(value = "所有者用户ID（共享后资源的所有者；转让时改此字段）")
+    private Long ownerId;
 
     @ApiModelProperty(value = "创建时间")
     private LocalDateTime createAt;
@@ -87,4 +87,11 @@ public class DocFileFolder implements Serializable {
     @ApiModelProperty(value = "版本号")
     @TableField(exist = false)
     private Integer oldVersion;
+
+    /**
+     * 是否根节点。parentId=0 或 null 都视为根。详见 spec §3.3 + §6.2 m13。
+     */
+    public boolean isRoot() {
+        return parentId == null || parentId == 0L;
+    }
 }

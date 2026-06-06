@@ -54,5 +54,8 @@ public class SysUserInfo implements Serializable {
     @ApiModelProperty(value = "0：正常，-1：删除，1：禁用")
     private Integer status;
 
+    @ApiModelProperty(value = "角色，USER=普通用户，ADMIN=管理员")
+    private String role;
+
 
 }

@@ -6,10 +6,13 @@
         <div class="selectIconBox" v-if="showSelect">
           <el-icon v-if="selectValues.includes(item.value)"><Select /></el-icon>
         </div>
+        <el-icon v-if="showIcon && item.elIcon" class="menuIcon" :size="16">
+          <component :is="elIconMap[item.elIcon]" />
+        </el-icon>
         <span
+          v-else-if="showIcon"
           class="menuIcon iconfont"
           :class="[item.icon]"
-          v-if="showIcon"
         ></span>
         <span class="menuText">{{ item.name }}</span>
       </div>
@@ -18,7 +21,9 @@
 </template>
 
 <script setup>
-import { Select } from '@element-plus/icons-vue'
+import { Select, Share } from '@element-plus/icons-vue'
+
+const elIconMap = { Share }
 
 const props = defineProps({
   list: {

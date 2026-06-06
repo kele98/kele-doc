@@ -99,6 +99,7 @@ public class SysUserInfoAOImpl implements SysUserInfoAO {
         UserInfoBO userInfoBO = new UserInfoBO();
         userInfoBO.setAccount(userInfo.getAccount());
         userInfoBO.setId(userInfo.getId());
+        userInfoBO.setRole(userInfo.getRole());
         stringRedisTemplate.opsForValue()
             .set(token, JSONUtil.toJsonStr(userInfoBO), CommonCons.LOGIN_EXPIRE_SECONDS, TimeUnit.SECONDS);
         stringRedisTemplate.opsForValue().set(key, token, CommonCons.LOGIN_TOKEN_EXPIRE_SECONDS, TimeUnit.SECONDS);
@@ -138,6 +139,7 @@ public class SysUserInfoAOImpl implements SysUserInfoAO {
         userInfoVO.setUserName(userInfo.getUserName());
         userInfoVO.setAvatar(userInfo.getAvatar());
         userInfoVO.setCreateAt(userInfo.getCreateAt());
+        userInfoVO.setRole(userInfo.getRole());
         return userInfoVO;
     }
 

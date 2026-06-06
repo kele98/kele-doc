@@ -28,6 +28,9 @@
       </div>
     </div>
     <div class="menuList">
+      <div class="sectionHeader" style="margin-top: 4px;">
+        <span class="text" style="font-size: 12px; color: #909399; padding-left: 24px;">文件</span>
+      </div>
       <div
         class="menuItem"
         :class="{ isActive: route.name === 'Collect' }"
@@ -53,6 +56,23 @@
           @currentChange="onCurrentChange"
         ></FolderTree>
       </div>
+      <!-- v0.7 BUG C fix：分享给我的 section -->
+      <div v-if="sharedFolders.length > 0" class="sharedWithMe">
+        <div class="sectionHeader">
+          <el-icon :size="16"><Share /></el-icon>
+          <span class="text">分享给我的</span>
+        </div>
+        <div
+          v-for="folder in sharedFolders"
+          :key="folder.id"
+          class="sharedItem"
+          :class="{ isActive: currentFolder && currentFolder.id === folder.id }"
+          @click="onSharedFolderClick(folder)"
+        >
+          <span class="iconfont icon-wenjianjia1"></span>
+          <span class="text">{{ folder.name }}</span>
+        </div>
+      </div>
       <div
         class="menuItem"
         :class="{ isActive: route.name === 'Panorama' }"
@@ -61,12 +81,34 @@
         <span class="iconfont icon-siweidaotu1"></span>
         <span class="text">文件全景图</span>
       </div>
+      <!-- 管理员专属 -->
+      <template v-if="isAdmin">
+        <div class="sectionHeader" style="margin-top: 16px;">
+          <span class="text" style="font-size: 12px; color: #909399; padding-left: 24px;">管理</span>
+        </div>
+        <div
+          class="menuItem"
+          :class="{ isActive: route.name === 'GroupManage' }"
+          @click="toGroupManage"
+        >
+          <el-icon :size="18"><UserFilled /></el-icon>
+          <span class="text">群组管理</span>
+        </div>
+        <div
+          class="menuItem"
+          :class="{ isActive: route.name === 'UserManage' }"
+          @click="toUserManage"
+        >
+          <el-icon :size="18"><User /></el-icon>
+          <span class="text">用户管理</span>
+        </div>
+      </template>
     </div>
   </div>
 </template>
 
 <script setup>
-import { nextTick, ref, watch, computed, onUnmounted } from 'vue'
+import { nextTick, ref, watch, computed, onMounted, onUnmounted } from 'vue'
 import config from '@/config'
 import useFileHandle from '@/hooks/useFileHandle'
 import { useStore } from '@/store'
@@ -74,6 +116,8 @@ import FolderTree from '../common/FolderTree.vue'
 import emitter from '@/utils/eventBus'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { UserFilled, User, Share } from '@element-plus/icons-vue'
+import api from '@/api'
 
 const store = useStore()
 const route = useRoute()
@@ -128,10 +172,64 @@ const toPanorama = () => {
   })
 }
 
+const isAdmin = computed(() => store.userInfo && store.userInfo.role === 'ADMIN')
+
+const toGroupManage = () => {
+  clearCurrentNode()
+  router.push({ name: 'GroupManage' })
+}
+
+const toUserManage = () => {
+  clearCurrentNode()
+  router.push({ name: 'UserManage' })
+}
+
 // 文件夹树
 const isLoadTree = ref(true)
 const isNotSetCurrentNode = ref(route.name !== 'List')
 const FolderTreeRef = ref(null)
+
+// v0.7 BUG C fix：分享给我的 folder 列表（isOwner=false 的可访问 folder）
+const sharedFolders = ref([])
+
+// 加载分享给我的列表
+const loadSharedFolders = async () => {
+  try {
+    const { data } = await api.getAccessibleFolders()
+    // 只保留别人分享给我的（isOwner=false），排除自己拥有的
+    const shared = (data || []).filter(f => f.isOwner === false)
+    // 过滤掉祖先已在列表中的 folder（只保留顶层入口）
+    const idSet = new Set(shared.map(f => f.id))
+    sharedFolders.value = shared.filter(f => {
+      // 沿 parent 链向上找，如果任何祖先也在列表中，则跳过
+      let pid = f.parentId
+      while (pid && pid !== 0) {
+        if (idSet.has(pid)) return false
+        // 找到 parentId 对应的 folder，继续往上
+        const parent = shared.find(s => s.id === pid)
+        pid = parent ? parent.parentId : 0
+      }
+      return true
+    })
+  } catch (e) {
+    // 静默失败：不影响主流程
+    sharedFolders.value = []
+  }
+}
+
+// 点击"分享给我的" folder：直接 setCurrentFolder + 跳 List（不知道 parent chain，
+// 不算路径，只算当前位置）
+const onSharedFolderClick = (folder) => {
+  clearCurrentNode()
+  store.setCurrentFolder(folder)
+  if (route.name !== 'List') {
+    router.push({ name: 'List' })
+  }
+}
+
+onMounted(() => {
+  loadSharedFolders()
+})
 // 监听当前所在文件夹，改变了刷新列表数据
 const currentFolder = computed(() => {
   return store.currentFolder
@@ -396,6 +494,57 @@ onUnmounted(() => {
 
         .text {
           margin-left: 6px;
+        }
+      }
+    }
+
+    // v0.7 BUG C fix：分享给我的 section 样式
+    .sharedWithMe {
+      .sectionHeader {
+        height: 32px;
+        display: flex;
+        align-items: center;
+        font-size: 14px;
+        font-weight: bold;
+        color: #6c7d8f;
+        padding-left: 24px;
+        margin-top: 12px;
+
+        .iconfont {
+          font-size: 16px;
+          margin-right: 6px;
+        }
+      }
+
+      .sharedItem {
+        height: 30px;
+        display: flex;
+        align-items: center;
+        font-size: 15px;
+        color: #212930;
+        padding-left: 32px;
+        cursor: pointer;
+        user-select: none;
+
+        &:hover {
+          background-color: var(--el-fill-color-light);
+        }
+
+        &.isActive {
+          background-color: var(--el-color-primary-light-9);
+        }
+
+        .iconfont {
+          font-size: 16px;
+          color: #6c7d8f;
+          margin-right: 6px;
+        }
+
+        .text {
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          flex: 1;
         }
       }
     }

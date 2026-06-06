@@ -12,9 +12,9 @@ import org.springframework.transaction.annotation.EnableTransactionManagement;
 @EnableTransactionManagement(proxyTargetClass = true)
 @MapperScan(basePackages = {"com.kele.core.buz.doc.dao.mapper", "com.kele.core.buz.sys.dao.mapper"})
 @Slf4j
-public class App {
+public class KeleDocApplication {
 
     public static void main(String[] args) {
-        SpringApplication.run(App.class, args);
+        SpringApplication.run(KeleDocApplication.class, args);
     }
 }

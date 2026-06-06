@@ -32,6 +32,9 @@ public class DocRecycle implements Serializable {
     @TableId(value = "id", type = IdType.AUTO)
     private Long id;
 
+    @ApiModelProperty(value = "被回收的文件夹ID（v0.8 新增；旧实现里 id 字段 = folderId，现在拆开）")
+    private Long folderId;
+
     @ApiModelProperty(value = "文件名")
     private String name;
 

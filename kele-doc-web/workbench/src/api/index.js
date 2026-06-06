@@ -140,6 +140,17 @@ export default {
     }
   },
 
+  // v0.7 BUG C fix：列出当前登录用户"可访问的 folder"全集（owner OR 通过 ACL 授权），
+  // 不限 parent_id。专门给 Sidebar 的 "分享给我的" section 用。
+  // 响应里 isOwner=true → 我的 folder，isOwner=false → 别人授权给我的。
+  async getAccessibleFolders() {
+    if (useMock) {
+      return getMockData('getAccessibleFolders')
+    }
+    const { data } = await http.get('/folders/accessible')
+    return { data }
+  },
+
   // 获取某个文件夹的路径
   getFolderPath(params) {
     if (useMock) {
@@ -306,5 +317,90 @@ export default {
       return getMockData('emptyRecycle')
     }
     return http.post('/emptyRecycle')
+  },
+
+  // ====== v0.7 共享/权限/群组相关 API ======
+
+  // 获取文件夹 ACL 列表（spec §4.2）
+  getFolderAcl(folderId) {
+    return http.get(`/doc/folders/${folderId}/acl`)
+  },
+
+  // 授予文件夹 ACL（spec §4.2；replace=true 全量替换）
+  grantFolderAcl(folderId, entries, replace = false) {
+    return http.post(`/doc/folders/${folderId}/acl`, { entries, replace })
+  },
+
+  // 撤销文件夹 ACL
+  revokeFolderAcl(folderId, aclId) {
+    return http.delete(`/doc/folders/${folderId}/acl/${aclId}`)
+  },
+
+  // 更新文件夹 ACL 权限级别
+  updateFolderAcl(folderId, aclId, permission) {
+    return http.put(`/doc/folders/${folderId}/acl/${aclId}`, { permission })
+  },
+
+  // 转移文件夹所有权
+  transferOwner(folderId, newOwnerId) {
+    return http.put(`/doc/folders/${folderId}/owner`, { newOwnerId })
+  },
+
+  // 搜索用户（ShareDialog 用）
+  searchUsers(params) {
+    return http.get('/users/search', { params })
+  },
+
+  // 列出当前用户所属的组（ShareDialog 用）
+  listMyGroups() {
+    return http.get('/admin/groups/my')
+  },
+
+  // ====== 群组管理 API（仅管理员） ======
+
+  listGroups(params) {
+    return http.get('/admin/groups', { params })
+  },
+
+  createGroup(data) {
+    return http.post('/admin/groups', data)
+  },
+
+  updateGroup(id, data) {
+    return http.put(`/admin/groups/${id}`, data)
+  },
+
+  dissolveGroup(id) {
+    return http.delete(`/admin/groups/${id}`)
+  },
+
+  restoreGroup(id) {
+    return http.post(`/admin/groups/${id}/restore`)
+  },
+
+  listGroupMembers(groupId) {
+    return http.get(`/admin/groups/${groupId}/members`)
+  },
+
+  addGroupMembers(groupId, userIds) {
+    return http.post(`/admin/groups/${groupId}/members`, { userIds })
+  },
+
+  removeGroupMember(groupId, userId) {
+    return http.delete(`/admin/groups/${groupId}/members/${userId}`)
+  },
+
+  // ====== 用户管理 API（仅管理员） ======
+
+  adminUserList(params) {
+    return http.get('/admin/users', { params })
+  },
+
+  adminUpdateUserStatus(id, status) {
+    return http.post(`/admin/users/${id}/status`, { status })
+  },
+
+  adminUpdateUserRole(id, role) {
+    return http.post(`/admin/users/${id}/role`, { role })
   }
 }

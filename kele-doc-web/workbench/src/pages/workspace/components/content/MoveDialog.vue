@@ -19,6 +19,7 @@
         <el-button @click="onClose">取消</el-button>
         <el-button type="primary" @click="onConfirmCopy">复制</el-button>
         <el-button
+          v-if="isCurrentFolderOwner"
           type="primary"
           @click="onConfirmMove"
           :disabled="disabledMove"
@@ -36,9 +37,18 @@ import emitter from '@/utils/eventBus'
 import api from '@/api'
 import FolderTree from '../common/FolderTree.vue'
 import { RESOURCE_TYPES } from '@/constant'
+import { useStore } from '@/store'
 
 const editData = ref(null)
 const loadTree = ref(false)
+const store = useStore()
+
+// 当前文件夹是否是自己的（非 owner 的共享文件夹下不允许移动）
+const isCurrentFolderOwner = computed(() => {
+  const folder = store.currentFolder
+  if (!folder || !store.userInfo) return true
+  return folder.isOwner !== false
+})
 const title = computed(() => {
   if (editData.value) {
     let name = editData.value.name || ''

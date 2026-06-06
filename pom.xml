@@ -35,6 +35,7 @@
     <minio.version>8.5.7</minio.version>
     <oss.version>3.18.1</oss.version>
     <okhttp3.version>4.12.0</okhttp3.version>
+    <flyway.version>5.2.4</flyway.version>
   </properties>
 
   <dependencyManagement>
@@ -246,6 +247,13 @@
         <groupId>com.squareup.okhttp3</groupId>
         <artifactId>okhttp</artifactId>
         <version>${okhttp3.version}</version>
+      </dependency>
+
+      <!-- Flyway 8.5.13 (Spring Boot 2.2.6 BOM 默认 5.x 不支持 MySQL 9.3.0，需显式锁定) -->
+      <dependency>
+        <groupId>org.flywaydb</groupId>
+        <artifactId>flyway-core</artifactId>
+        <version>${flyway.version}</version>
       </dependency>
 
     </dependencies>

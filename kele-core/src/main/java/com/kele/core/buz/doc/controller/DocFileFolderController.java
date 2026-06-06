@@ -96,4 +96,18 @@ public class DocFileFolderController {
         docFileFolderAO.copyFolder(copyVO);
         return ResponseResult.ok();
     }
+
+    /**
+     * v0.7 BUG C fix：列出当前登录用户"可访问的 folder"全集（owner OR 通过 ACL 授权），
+     * 不限 parent_id。前端 "分享给我的" section 用 isOwner=false 过滤。
+     *
+     * <p>举例：test 登录，admin 把 folder 7 (parent=6) 和 folder 6 (parent=0) 都分享给 test。
+     * 从 root tree 进不去（folder 6 的 ACL 行没生效或被旧版代码忽略了），
+     * 此端点直接返所有可访问的 folder，UI 单独一个 section 展示，
+     * 用户能直接点进去。
+     */
+    @GetMapping(value = "/folders/accessible")
+    public ResponseResult<List<DocFileFolderResVO>> getAccessibleFolders() {
+        return ResponseResult.ok(docFileFolderAO.getAccessibleFolders());
+    }
 }
