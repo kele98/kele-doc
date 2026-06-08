@@ -18,4 +18,9 @@ public class DocFileFolderResVO extends DocFileFolderBaseResVO {
      * 前端 "分享给我的" section 用 isOwner=false 过滤。
      */
     private Boolean isOwner;
+
+    /**
+     * v0.7：是否已被分享（存在有效 ACL 条目）。前端用此字段展示分享标识。
+     */
+    private Boolean isShared;
 }

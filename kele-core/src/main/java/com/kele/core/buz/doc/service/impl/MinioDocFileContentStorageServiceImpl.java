@@ -4,7 +4,6 @@ import com.kele.common.enums.ErrorCodeEnum;
 import com.kele.common.exception.BusinessException;
 import com.kele.core.buz.doc.service.AbstractFileSystemStorageService;
 import com.kele.core.other.constants.CommonCons;
-import com.kele.core.other.context.LoginContext;
 import com.kele.core.buz.doc.dao.entity.DocFileFolder;
 import com.kele.core.buz.doc.model.vo.DocFileContentResVO;
 import com.kele.core.buz.doc.permission.PermissionService;
@@ -49,7 +48,6 @@ import org.springframework.util.StringUtils;
 public class MinioDocFileContentStorageServiceImpl extends AbstractFileSystemStorageService {
 
     private static final int BUFF_SIZE = 1024 * 4;
-    private static final String USER_ID_PREFIX = "user_id_%s";
     private static final String FILE_ID_PREFIX = "file_id_%s";
     // file_{版本}
     private static final String FILE_VERSION_PREFIX = "file_%s";
@@ -100,12 +98,12 @@ public class MinioDocFileContentStorageServiceImpl extends AbstractFileSystemSto
     @Override
     public boolean copy(List<DocFileFolder> fileFolders) {
         fileFolders.forEach(fileFolder -> {
-            String srcFilePath = this.getFilePath(fileFolder.getOldId(),fileFolder.getCreatorId(), fileFolder.getOldVersion());
+            String srcFilePath = this.getFilePath(fileFolder.getOldId(), fileFolder.getOldVersion());
             CopySource source = CopySource.builder()
                 .bucket(this.bucket)
                 .object(srcFilePath)
                 .build();
-            String targetFilePath = this.getFilePath(fileFolder.getId(),LoginContext.getUserId(), fileFolder.getVersion());
+            String targetFilePath = this.getFilePath(fileFolder.getId(), fileFolder.getVersion());
             try {
                 this.minioClient.copyObject(CopyObjectArgs.builder()
                     .bucket(this.bucket)
@@ -212,14 +210,11 @@ public class MinioDocFileContentStorageServiceImpl extends AbstractFileSystemSto
     }
 
     private String getFilePath(DocFileFolder file, Integer version) {
-        return this.path + String.format(USER_ID_PREFIX, file.getCreatorId()) + CommonCons.FORWARD_SLANT + String.format(
-                FILE_ID_PREFIX,
-                file.getId()) + CommonCons.FORWARD_SLANT + String.format(FILE_VERSION_PREFIX, version);
+        return this.getFilePath(file.getId(), version);
     }
-    private String getFilePath(Long fileId,Long userId, Integer version) {
-        return this.path + String.format(USER_ID_PREFIX, userId) + CommonCons.FORWARD_SLANT + String.format(
-                FILE_ID_PREFIX,
-                fileId) + CommonCons.FORWARD_SLANT + String.format(FILE_VERSION_PREFIX, version);
+
+    private String getFilePath(Long fileId, Integer version) {
+        return this.path + String.format(FILE_ID_PREFIX, fileId) + CommonCons.FORWARD_SLANT + String.format(FILE_VERSION_PREFIX, version);
     }
 
     private String upload(Supplier<InputStream> supplier, String objectName, String contentType) {

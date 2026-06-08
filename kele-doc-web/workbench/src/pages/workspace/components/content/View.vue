@@ -155,15 +155,16 @@ const emits = defineEmits(['renamed', 'moved', 'deleted', 'folderClick'])
 const fileHandle = useFileHandle()
 const store = useStore()
 
-// 当前文件夹是否是自己的（非 owner 的共享文件夹，隐藏复制/移动、分享菜单）
+// 当前文件夹是否是自己的（非 owner 的共享文件夹，隐藏分享菜单）
 const isCurrentFolderOwner = computed(() => {
   const folder = store.currentFolder
   if (!folder || !store.userInfo) return true
   return folder.isOwner !== false
 })
 
-// 非 owner 时，过滤掉 copyOrMove 和 share 的默认菜单项
-const ownerOnlyActions = ['copyOrMove', 'share']
+// 非 owner 时，过滤掉 share 的默认菜单项
+// copyOrMove 保留：复制允许（后端 READ+WRITE 即可），移动由 MoveDialog 的 isCurrentFolderOwner 控制隐藏
+const ownerOnlyActions = ['share']
 
 // 计算覆盖后的文件夹菜单列表
 const effectiveFolderMenuList = computed(() => {

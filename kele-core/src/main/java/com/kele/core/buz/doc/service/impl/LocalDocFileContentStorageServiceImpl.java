@@ -3,7 +3,6 @@ package com.kele.core.buz.doc.service.impl;
 import com.kele.common.enums.ErrorCodeEnum;
 import com.kele.common.exception.BusinessException;
 import com.kele.core.buz.doc.service.AbstractFileSystemStorageService;
-import com.kele.core.other.context.LoginContext;
 import com.kele.core.buz.doc.dao.entity.DocFileFolder;
 import com.kele.core.buz.doc.model.dto.DocFileCopyDTO;
 import com.kele.core.buz.doc.model.vo.DocFileContentResVO;
@@ -41,7 +40,6 @@ import org.springframework.util.StringUtils;
 public class LocalDocFileContentStorageServiceImpl extends AbstractFileSystemStorageService {
 
     private static final int BUFF_SIZE = 1024 * 4;
-    private static final String USER_ID_PREFIX = "user_id_%s";
     private static final String FILE_ID_PREFIX = "file_id_%s";
     // file_{版本}
     private static final String FILE_VERSION_PREFIX = "file_%s";
@@ -112,7 +110,7 @@ public class LocalDocFileContentStorageServiceImpl extends AbstractFileSystemSto
 
     @Override
     public boolean delete(DocFileFolder docFileFolder) {
-        String filePath = this.getFilePath(docFileFolder.getOldId(), docFileFolder.getOldVersion());
+        String filePath = this.getFilePath(docFileFolder.getId(), docFileFolder.getVersion());
         File file = new File(filePath);
         return file.exists() ? file.delete() : true;
     }
@@ -226,13 +224,11 @@ public class LocalDocFileContentStorageServiceImpl extends AbstractFileSystemSto
     }
 
     private String getFileDirPath(Long fileId) {
-        return this.path + String.format(USER_ID_PREFIX, LoginContext.getUserId()) + File.separator + String.format(FILE_ID_PREFIX,
-            fileId);
+        return this.path + String.format(FILE_ID_PREFIX, fileId);
     }
 
     private String getFilePath(Long fileId, Integer version) {
-        return this.path + String.format(USER_ID_PREFIX, LoginContext.getUserId()) + File.separator + String.format(FILE_ID_PREFIX,
-            fileId) + File.separator + String.format(FILE_VERSION_PREFIX, version);
+        return this.path + String.format(FILE_ID_PREFIX, fileId) + File.separator + String.format(FILE_VERSION_PREFIX, version);
     }
 
     private String getFilePath(String dirPath, Integer version) {

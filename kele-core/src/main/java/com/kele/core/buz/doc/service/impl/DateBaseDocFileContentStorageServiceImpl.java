@@ -121,7 +121,8 @@ public class DateBaseDocFileContentStorageServiceImpl implements IDocFileContent
 
     @Override
     public boolean delete(DocFileFolder docFileFolder) {
-        throw new UnsupportedOperationException("暂不支持物理删除文件！");
+        // DB 模式：删除 doc_file_content 行（id 与 doc_file_folder.id 一致）
+        return docFileContentService.removeById(docFileFolder.getId());
     }
 
     @Override

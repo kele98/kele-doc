@@ -9,6 +9,8 @@ import com.kele.common.exception.BusinessException;
 import com.kele.core.other.aspect.lock.ConcurrentLock;
 import com.kele.core.buz.doc.ao.AbstractDocFileFolderAO;
 import com.kele.core.buz.doc.ao.DocFileFolderAO;
+import com.kele.core.buz.doc.dao.entity.DocFileFolderAcl;
+import com.kele.core.buz.doc.dao.mapper.DocFileFolderAclMapper;
 import com.kele.core.buz.doc.model.vo.DocSynthFileFolderResVO;
 import com.kele.core.other.constants.RedissonLockPrefixCons;
 import com.kele.core.other.context.LoginContext;
@@ -29,12 +31,15 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
@@ -45,6 +50,9 @@ import org.springframework.util.StringUtils;
 @Slf4j
 @Service
 public class DocFileFolderAOImpl extends AbstractDocFileFolderAO implements DocFileFolderAO {
+
+    @Autowired
+    private DocFileFolderAclMapper docFileFolderAclMapper;
 
     /**
      * v0.11 B1 重构：creatorId → ownerId，加 NOT IN doc_recycle 过滤（scope=mine 语义）。
@@ -136,9 +144,29 @@ public class DocFileFolderAOImpl extends AbstractDocFileFolderAO implements DocF
                 DocFileFolderResVO resVO = new DocFileFolderResVO();
                 resVO.setId(fileFolder.getId());
                 resVO.setName(fileFolder.getName());
-                resVO.setIsOrgPublic(false);  // 简化：默认 false（精确值需另查）
                 return resVO;
             }).collect(Collectors.toList());
+
+        // 批量查每个 folder 的 ACL 主体类型，用于填充 isOrgPublic / isShared
+        // Bug #7: isShared 只算 USER/GROUP（不算 ORG），与 getAccessibleFolders 语义对齐
+        if (!fileFolderBaseResVOList.isEmpty()) {
+            List<Long> folderIds = fileFolderBaseResVOList.stream()
+                .map(DocFileFolderResVO::getId).collect(Collectors.toList());
+            List<DocFileFolderAcl> acls = docFileFolderAclMapper.selectList(
+                Wrappers.<DocFileFolderAcl>lambdaQuery()
+                    .in(DocFileFolderAcl::getFolderId, folderIds)
+                    .isNull(DocFileFolderAcl::getRevokedAt));
+            Map<Long, Set<String>> folderAclTypesMap = new HashMap<>();
+            for (DocFileFolderAcl acl : acls) {
+                folderAclTypesMap.computeIfAbsent(acl.getFolderId(), k -> new HashSet<>())
+                    .add(acl.getPrincipalType());
+            }
+            fileFolderBaseResVOList.forEach(vo -> {
+                Set<String> types = folderAclTypesMap.getOrDefault(vo.getId(), Collections.emptySet());
+                vo.setIsOrgPublic(types.contains("ORG"));
+                vo.setIsShared(types.stream().anyMatch(t -> "USER".equals(t) || "GROUP".equals(t)));
+            });
+        }
 
         List<DocFileResVO> fileList = this.filterFileList(fileFolders, isTop);
 
@@ -206,8 +234,8 @@ public class DocFileFolderAOImpl extends AbstractDocFileFolderAO implements DocF
             if (FileFolderFormatEnum.FILE.getFormat().equals(parent.getFormat())) {
                 throw new BusinessException(ErrorCodeEnum.ERROR.getCode(), "只允许在文件夹下创建文件！");
             }
-            // 校验：创建子文件夹需要父 MANAGE（v0.7 §5.4.a/b 隐含语义）
-            permissionService.requireManage(parentFolderId);
+            // 校验：创建子文件夹需要父 WRITE（WRITE 用户可在共享文件夹内增删内容）
+            permissionService.requireWrite(parentFolderId);
         }
         DocFileFolder docFileFolder = new DocFileFolder();
         docFileFolder.setParentId(parentFolderId);
@@ -245,6 +273,8 @@ public class DocFileFolderAOImpl extends AbstractDocFileFolderAO implements DocF
 
     @Override
     public void updateFolder(FileFolderUpdateVO updateVO) {
+        // 重命名属于修改操作，至少需要 WRITE 权限
+        permissionService.requireWrite(updateVO.getId());
         DocFileFolder docFileFolder = super.getById(updateVO.getId());
         if (Objects.isNull(docFileFolder)) {
             throw new BusinessException(ErrorCodeEnum.ERROR.getCode(), "文件夹不存在！");
@@ -277,12 +307,12 @@ public class DocFileFolderAOImpl extends AbstractDocFileFolderAO implements DocF
         List<Long> idList = childList.stream().map(DocFileFolder::getId).distinct().collect(Collectors.toList());
         Long userId = LoginContext.getUserId();
         LocalDateTime now = LocalDateTime.now();
-        List<DocRecycle> docRecycleList = idList.stream().map(folderId -> {
+        List<DocRecycle> docRecycleList = childList.stream().map(folder -> {
             DocRecycle docRecycle = new DocRecycle();
             // v0.11 B5: 删 setId(folderId)，加 setFolderId(folderId)
-            docRecycle.setFolderId(folderId);
-            docRecycle.setIdList(Collections.singletonList(folderId));
-            docRecycle.setName("");  // 简化：原代码用 docFileFolder.getName() 但每个 child 的 name 不同；此处只记当前 folder 的 name
+            docRecycle.setFolderId(folder.getId());
+            docRecycle.setIdList(Collections.singletonList(folder.getId()));
+            docRecycle.setName(folder.getName());  // 每个 child 用自己的 name，避免回收站列表空白
             docRecycle.setUserId(userId);
             docRecycle.setCreateAt(now);
             return docRecycle;
@@ -405,9 +435,9 @@ public class DocFileFolderAOImpl extends AbstractDocFileFolderAO implements DocF
      */
     @Override
     public void copyFolder(FileFolderCopyVO copyVO) {
-        // 源 READ + 目标父 MANAGE
+        // 源 READ + 目标父 WRITE
         permissionService.requireRead(copyVO.getId());
-        permissionService.requireManage(copyVO.getFolderId());
+        permissionService.requireWrite(copyVO.getFolderId());
 
         DocFileFolder docFileFolder = docFileFolderService.getById(copyVO.getId());
         if (Objects.isNull(docFileFolder)) {
@@ -512,6 +542,9 @@ public class DocFileFolderAOImpl extends AbstractDocFileFolderAO implements DocF
      * <p>用途：解决被分享 folder 在父级 chain 上无 ACL 时的"孤儿授权"问题——
      * 比如 admin 分享 folder 7 给 test 但 folder 6（folder 7 的 parent）没分享，
      * test 无法从 root tree 找到入口，此端点能直接列出所有可访问 folder 让 test "看到入口"。
+     *
+     * <p>v0.13 Bug #7 修复：批量查 ACL 填充 isOrgPublic / isShared 字段。
+     * 之前这两个字段恒 null（死字段），前端无法区分 ORG-public 和明确分享。
      */
     @Override
     public List<DocFileFolderResVO> getAccessibleFolders() {
@@ -525,6 +558,19 @@ public class DocFileFolderAOImpl extends AbstractDocFileFolderAO implements DocF
                     .and(w1 -> w1.eq(DocFileFolder::getOwnerId, userId))
                     .or(w2 -> w2.inSql(DocFileFolder::getId, aclSubSql)))
             .notInSql(DocFileFolder::getId, recycleSubSql));
+        // Bug #7：批量查每个 folder 的 ACL 主体类型，用于填充 isOrgPublic / isShared
+        Set<Long> folderIdSet = fileFolders.stream().map(DocFileFolder::getId).collect(Collectors.toSet());
+        Map<Long, Set<String>> folderAclTypesMap = new HashMap<>();
+        if (!folderIdSet.isEmpty()) {
+            List<DocFileFolderAcl> acls = docFileFolderAclMapper.selectList(
+                Wrappers.<DocFileFolderAcl>lambdaQuery()
+                    .in(DocFileFolderAcl::getFolderId, folderIdSet)
+                    .isNull(DocFileFolderAcl::getRevokedAt));
+            for (DocFileFolderAcl acl : acls) {
+                folderAclTypesMap.computeIfAbsent(acl.getFolderId(), k -> new HashSet<>())
+                    .add(acl.getPrincipalType());
+            }
+        }
         return fileFolders.stream()
             // 只返 folder 不返 file（"分享给我的" 不该包含 file）
             .filter(f -> FileFolderFormatEnum.FOLDER.getFormat().equals(f.getFormat()))
@@ -535,6 +581,10 @@ public class DocFileFolderAOImpl extends AbstractDocFileFolderAO implements DocF
                 resVO.setParentId(f.getParentId());
                 resVO.setIsOwner(userId.equals(f.getOwnerId()));
                 resVO.setLeaf(f.getFolderCount() <= 0);
+                // Bug #7：填充共享来源字段
+                Set<String> types = folderAclTypesMap.getOrDefault(f.getId(), Collections.emptySet());
+                resVO.setIsOrgPublic(types.contains("ORG"));
+                resVO.setIsShared(types.stream().anyMatch(t -> "USER".equals(t) || "GROUP".equals(t)));
                 return resVO;
             })
             .collect(Collectors.toList());
@@ -621,8 +671,10 @@ public class DocFileFolderAOImpl extends AbstractDocFileFolderAO implements DocF
     /**
      * 构建 ACL 子查询 SQL：返回当前用户通过 ACL 可访问的 folder_id 集合。
      * 用在 inSql() 里，避免 MyBatis-Plus LambdaQueryWrapper.in(column, Wrapper) 不支持子查询的问题。
+     *
+     * <p>package-private for test（{@code DocFileFolderAOImplTest} 直接断言 SQL 三分支齐全 + revoked_at 过滤）。
      */
-    private String buildAclSubSql(Long userId) {
+    String buildAclSubSql(Long userId) {
         List<Long> groupIds = this.getMyGroupIds();
         String inClause = groupIds.isEmpty() ? "(-1)"
             : groupIds.stream().map(String::valueOf).collect(Collectors.joining(","));

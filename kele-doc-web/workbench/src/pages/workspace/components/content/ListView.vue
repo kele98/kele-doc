@@ -41,6 +41,10 @@
             <span class="name" :title="scope.row.name">{{
               scope.row.name
             }}</span>
+            <span
+              v-if="scope.row.type === RESOURCE_TYPES.FOLDER && scope.row.isShared"
+              class="sharedTag"
+            >已分享</span>
             <CollectBtn
               v-if="showCollectBtn && scope.row.type !== RESOURCE_TYPES.FOLDER"
               :data="scope.row"
@@ -251,6 +255,19 @@ const onMenuClick = (action, data) => {
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+    }
+
+    .sharedTag {
+      flex-shrink: 0;
+      font-size: 11px;
+      line-height: 1;
+      padding: 3px 6px;
+      border-radius: 8px;
+      background: #ecf5ff;
+      color: #409eff;
+      border: 1px solid #d9ecff;
+      margin-left: 6px;
+      margin-right: 8px;
     }
   }
 

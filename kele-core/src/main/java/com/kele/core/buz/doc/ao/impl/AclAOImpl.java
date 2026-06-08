@@ -7,14 +7,17 @@ import com.kele.core.buz.doc.ao.AclAO;
 import com.kele.core.buz.doc.dao.entity.DocFileFolder;
 import com.kele.core.buz.doc.dao.entity.DocFileFolderAcl;
 import com.kele.core.buz.doc.dao.entity.GroupMember;
+import com.kele.core.buz.doc.dao.entity.KeleGroup;
 import com.kele.core.buz.sys.dao.entity.SysUserInfo;
 import com.kele.core.buz.doc.dao.mapper.DocFileFolderAclMapper;
 import com.kele.core.buz.doc.dao.mapper.DocFileFolderMapper;
 import com.kele.core.buz.doc.dao.mapper.GroupMemberMapper;
+import com.kele.core.buz.doc.dao.mapper.KeleGroupMapper;
 import com.kele.core.buz.sys.dao.mapper.SysUserInfoMapper;
 import com.kele.core.buz.doc.model.vo.AclEntryVO;
 import com.kele.core.buz.doc.model.vo.DocFileFolderAclListVO;
 import com.kele.core.other.context.LoginContext;
+import com.kele.core.buz.doc.permission.AclRevokeReason;
 import com.kele.core.buz.doc.permission.PermissionLevel;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -51,6 +54,7 @@ public class AclAOImpl implements AclAO {
     private final DocFileFolderAclMapper docFileFolderAclMapper;
     private final DocFileFolderMapper docFileFolderMapper;
     private final GroupMemberMapper groupMemberMapper;
+    private final KeleGroupMapper keleGroupMapper;
     private final SysUserInfoMapper sysUserInfoMapper;
     private final TransactionTemplate transactionTemplate;
 
@@ -73,21 +77,30 @@ public class AclAOImpl implements AclAO {
         boolean isOrgPublic = false;
         String orgPublicPermission = null;
         if (!acls.isEmpty()) {
-            // 收集 principal 名（USER → userName，GROUP → group name（暂用 groupId 字符串））
+            // 收集 USER 和 GROUP 的 principal id
             Set<Long> userIds = new HashSet<>();
+            Set<Long> groupIds = new HashSet<>();
             for (DocFileFolderAcl acl : acls) {
                 if ("USER".equals(acl.getPrincipalType())) {
                     userIds.add(acl.getPrincipalId());
+                } else if ("GROUP".equals(acl.getPrincipalType())) {
+                    groupIds.add(acl.getPrincipalId());
                 }
             }
+            // USER：userName 为 null 时 fallback 到 account
             Map<Long, String> userNameMap = userIds.isEmpty()
                 ? Collections.emptyMap()
                 : sysUserInfoMapper.selectBatchIds(userIds).stream()
-                    // v0.7 修复：JDK 8 HashMap.merge 拒 null value，user_name=NULL 的行
-                    // （/register 不强制 nickname）会让 Collectors.toMap 抛 NPE。
-                    // 过滤掉 null userName，下游 getOrDefault(..., "") 自动 fallback。
-                    .filter(u -> u.getUserName() != null)
-                    .collect(Collectors.toMap(SysUserInfo::getId, SysUserInfo::getUserName, (a, b) -> a));
+                    .collect(Collectors.toMap(
+                        SysUserInfo::getId,
+                        u -> u.getUserName() != null ? u.getUserName() : u.getAccount(),
+                        (a, b) -> a));
+            // GROUP：查实际群组名
+            Map<Long, String> groupNameMap = groupIds.isEmpty()
+                ? Collections.emptyMap()
+                : keleGroupMapper.selectBatchIds(groupIds).stream()
+                    .filter(g -> g.getName() != null)
+                    .collect(Collectors.toMap(KeleGroup::getId, KeleGroup::getName, (a, b) -> a));
 
             for (DocFileFolderAcl acl : acls) {
                 if ("ORG".equals(acl.getPrincipalType())) {
@@ -99,7 +112,7 @@ public class AclAOImpl implements AclAO {
                 } else {
                     String name = "USER".equals(acl.getPrincipalType())
                         ? userNameMap.getOrDefault(acl.getPrincipalId(), "")
-                        : ("GROUP-" + acl.getPrincipalId());
+                        : groupNameMap.getOrDefault(acl.getPrincipalId(), "");
                     entries.add(new AclEntryVO(acl.getId(), acl.getPrincipalType(), acl.getPrincipalId(),
                         acl.getPermission(), name, acl.getGrantedBy(),
                         acl.getCreatedAt() == null ? null : acl.getCreatedAt().toString()));
@@ -123,10 +136,12 @@ public class AclAOImpl implements AclAO {
         transactionTemplate.execute(status -> {
             if (replace) {
                 // 全量替换：先撤销本 folder 全部有效 ACL
+                // 写 revoke_reason='REPLACE'，避免后续 restoreGroup 时被误复活
                 docFileFolderAclMapper.update(null, Wrappers.<DocFileFolderAcl>lambdaUpdate()
                     .eq(DocFileFolderAcl::getFolderId, folderId)
                     .isNull(DocFileFolderAcl::getRevokedAt)
-                    .set(DocFileFolderAcl::getRevokedAt, now));
+                    .set(DocFileFolderAcl::getRevokedAt, now)
+                    .set(DocFileFolderAcl::getRevokeReason, AclRevokeReason.REPLACE));
             }
             for (AclEntryVO e : entries) {
                 validateEntry(e);
@@ -176,6 +191,7 @@ public class AclAOImpl implements AclAO {
         }
         transactionTemplate.execute(status -> {
             acl.setRevokedAt(LocalDateTime.now());
+            acl.setRevokeReason(AclRevokeReason.MANUAL);
             docFileFolderAclMapper.updateById(acl);
             enforceLastManage(folderId);
             return null;
@@ -264,7 +280,7 @@ public class AclAOImpl implements AclAO {
      * 撤销/修改后校验"至少保留一条 MANAGE 有效行"。该 folder 本身 owner 永远算 MANAGE。
      * <p>
      * v0.7 修正：原逻辑只查 ACL 表里 USER/GROUP 的 MANAGE 行数，userCount==0 就抛错。
-     * 但 owner 本身也算 MANAGE（{@link PermissionService} 命中 OWNER 直接返 MANAGE），
+     * 但 owner 本身也算 MANAGE（命中 OWNER 直接返 MANAGE），
      * 刚创建的文件夹没有 ACL MANAGE 行时撤销唯一一条 READ/WRITE 会被误报。
      * 修正：owner 存在时直接 return（owner 本身就是 MANAGE 兜底）。
      */

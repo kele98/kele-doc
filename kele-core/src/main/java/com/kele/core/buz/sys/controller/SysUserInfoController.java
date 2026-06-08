@@ -2,6 +2,8 @@ package com.kele.core.buz.sys.controller;
 
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.kele.common.enums.ErrorCodeEnum;
+import com.kele.common.exception.BusinessException;
 import com.kele.common.model.ResponseResult;
 import com.kele.core.buz.sys.ao.SysUserInfoAO;
 import com.kele.core.buz.sys.dao.entity.SysUserInfo;
@@ -14,6 +16,7 @@ import com.kele.core.buz.sys.model.vo.UserPwdModifyVO;
 import com.kele.core.buz.sys.model.vo.UserRegisterVO;
 import com.kele.core.buz.sys.model.vo.UserSearchVO;
 import com.kele.core.buz.sys.service.ISysUserInfoService;
+import com.kele.core.other.context.LoginContext;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -51,6 +54,12 @@ public class SysUserInfoController {
 
     @Autowired
     private ISysUserInfoService sysUserInfoService;
+
+    private void requireAdmin() {
+        if (!LoginContext.isAdmin()) {
+            throw new BusinessException(ErrorCodeEnum.PERMISSION_DENIED.getCode(), "仅管理员可访问");
+        }
+    }
 
     @PostMapping("/register")
     public ResponseResult<Void> register(@RequestBody @Validated UserRegisterVO userRegisterVO) {
@@ -96,6 +105,7 @@ public class SysUserInfoController {
             @RequestParam(value = "keyword", defaultValue = "") String keyword,
             @RequestParam(value = "page", defaultValue = "1") int page,
             @RequestParam(value = "size", defaultValue = "20") int size) {
+        requireAdmin();
         if (size <= 0) size = 20;
         if (size > 100) size = 100;
         if (page < 1) page = 1;
@@ -123,6 +133,7 @@ public class SysUserInfoController {
     public ResponseResult<Void> updateUserStatus(
             @PathVariable("id") Long id,
             @RequestBody Map<String, Integer> body) {
+        requireAdmin();
         Integer status = body.get("status");
         if (status == null || (status != 0 && status != 1)) {
             return ResponseResult.fail("status 必须为 0（正常）或 1（禁用）");
@@ -148,6 +159,7 @@ public class SysUserInfoController {
     public ResponseResult<Void> updateUserRole(
             @PathVariable("id") Long id,
             @RequestBody Map<String, String> body) {
+        requireAdmin();
         String role = body.get("role");
         if (!"USER".equals(role) && !"ADMIN".equals(role)) {
             return ResponseResult.fail("role 必须为 USER 或 ADMIN");

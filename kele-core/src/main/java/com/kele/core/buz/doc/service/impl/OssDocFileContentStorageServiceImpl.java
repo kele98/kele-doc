@@ -9,7 +9,6 @@ import com.kele.common.enums.ErrorCodeEnum;
 import com.kele.common.exception.BusinessException;
 import com.kele.core.buz.doc.service.AbstractFileSystemStorageService;
 import com.kele.core.other.constants.CommonCons;
-import com.kele.core.other.context.LoginContext;
 import com.kele.core.buz.doc.dao.entity.DocFileFolder;
 import com.kele.core.buz.doc.model.vo.DocFileContentResVO;
 import com.kele.core.buz.doc.permission.PermissionService;
@@ -46,7 +45,6 @@ import org.springframework.util.StringUtils;
 public class OssDocFileContentStorageServiceImpl extends AbstractFileSystemStorageService {
 
     private static final int BUFF_SIZE = 1024 * 4;
-    private static final String USER_ID_PREFIX = "user_id_%s";
     private static final String FILE_ID_PREFIX = "file_id_%s";
     // file_{版本}
     private static final String FILE_VERSION_PREFIX = "file_%s";
@@ -202,10 +200,8 @@ public class OssDocFileContentStorageServiceImpl extends AbstractFileSystemStora
     }
 
     private String getFilePath(Long fileId, Integer version) {
-        return this.path + String.format(USER_ID_PREFIX, LoginContext.getUserId()) + CommonCons.FORWARD_SLANT
-            + String.format(
-            FILE_ID_PREFIX,
-            fileId) + CommonCons.FORWARD_SLANT + String.format(FILE_VERSION_PREFIX, version);
+        return this.path + String.format(FILE_ID_PREFIX, fileId) + CommonCons.FORWARD_SLANT
+            + String.format(FILE_VERSION_PREFIX, version);
     }
 
     private String upload(Supplier<InputStream> supplier, String objectName, String contentType) {

@@ -44,6 +44,7 @@ public class DocFileContentAOImpl extends AbstractDocFileFolderAO implements Doc
     @Override
     @Deprecated
     public DocFileContentResVO getFileContent(Long id) {
+        permissionService.requireRead(id);
         DocFileFolder docFileFolder = super.getById(id);
         return docFileContentStorageService.getFileContent(docFileFolder);
     }
@@ -235,8 +236,8 @@ public class DocFileContentAOImpl extends AbstractDocFileFolderAO implements Doc
         for (Long id : reqVO.getIds()) {
             permissionService.requireRead(id);
         }
-        // 目标父 MANAGE 校验（v0.7 §5.4.a 文件级 MANAGE）
-        permissionService.requireManage(newFolderId);
+        // 目标父 WRITE 校验（WRITE 用户可在文件夹内创建/复制文件）
+        permissionService.requireWrite(newFolderId);
 
         List<Long> originIdList = reqVO.getIds();
         List<DocFileFolder> fileFolders = super.selectByIdList(originIdList);
@@ -332,6 +333,7 @@ public class DocFileContentAOImpl extends AbstractDocFileFolderAO implements Doc
 
     @Override
     public void downloadFileContent(Long id, HttpServletResponse response) {
+        permissionService.requireRead(id);
         DocFileFolder docFileFolder = super.getById(id);
         docFileContentStorageService.downloadFileContent(docFileFolder, response);
     }

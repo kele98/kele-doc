@@ -11,6 +11,7 @@ import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.kele.core.buz.doc.dao.entity.DocFileFolder;
 import com.kele.core.buz.doc.dao.entity.DocFileFolderAcl;
 import com.kele.core.buz.doc.dao.entity.DocRecycle;
+import com.kele.core.buz.doc.dao.mapper.DocFileFolderAclMapper;
 import com.kele.core.buz.doc.model.vo.DocFileFolderResVO;
 import com.kele.core.buz.doc.permission.PermissionService;
 import com.kele.core.buz.doc.service.IDocFileContentStorageService;
@@ -58,6 +59,7 @@ class DocFileFolderAOImplTest {
     @Mock private IDocFileContentStorageService docFileContentStorageService;
     @Mock private TransactionTemplate transactionTemplate;
     @Mock private PermissionService permissionService;
+    @Mock private DocFileFolderAclMapper docFileFolderAclMapper;
 
     @InjectMocks private DocFileFolderAOImpl docFileFolderAO;
 
@@ -219,5 +221,53 @@ class DocFileFolderAOImplTest {
             "我 owner 的 folder isOwner 应为 true");
         assertTrue(Boolean.FALSE.equals(sharedVo.getIsOwner()),
             "别人分享给我的 folder isOwner 应为 false");
+    }
+
+    /**
+     * v0.13 Task #11: 锁死 buildAclSubSql 的三分支 OR 模式 + revoked_at 过滤。
+     * 这是 ACL 链路核心 SQL，后续切 CTE-primary 重构时若三分支写漏会被此测试捕获。
+     */
+    @Test
+    @DisplayName("buildAclSubSql: 包含 USER / ORG / GROUP 三分支 + revoked_at IS NULL（空群组）")
+    void buildAclSubSql_containsAllThreeOrBranches_noGroups() {
+        // setUp() 默认空群组，inClause = "(-1)"
+        String sql = docFileFolderAO.buildAclSubSql(200L);
+        assertNotNull(sql, "buildAclSubSql 必须返回非空 SQL");
+
+        // 三分支齐全
+        assertTrue(sql.contains("principal_type = 'USER'"),
+            "缺少 USER 分支，SQL: " + sql);
+        assertTrue(sql.contains("principal_id = 200"),
+            "USER 分支 principal_id 必须是当前 userId，SQL: " + sql);
+        assertTrue(sql.contains("principal_type = 'ORG'"),
+            "缺少 ORG 分支，SQL: " + sql);
+        assertTrue(sql.contains("principal_id IN"),
+            "缺少 GROUP 分支（principal_id IN (...)），SQL: " + sql);
+        // 源码 inClause = "(-1)" 已带括号，外层 IN ( 再加一层 → IN ((-1))。
+        // 只断言 (-1) 标记存在即可，不绑死括号层数。
+        assertTrue(sql.contains("(-1)"),
+            "空群组 inClause 必须含 (-1) 占位（不命中任何 group），SQL: " + sql);
+
+        // revoked_at 过滤
+        assertTrue(sql.contains("revoked_at IS NULL"),
+            "缺少 revoked_at IS NULL 过滤（活跃 ACL 才算），SQL: " + sql);
+    }
+
+    @Test
+    @DisplayName("buildAclSubSql: 群组 id 插入 inClause")
+    void buildAclSubSql_groupIdsInterpolatedIntoInClause() {
+        // 覆盖 setUp() 的默认空群组
+        LoginContext.setUserGroupIds(java.util.Arrays.asList(10L, 20L));
+        String sql = docFileFolderAO.buildAclSubSql(200L);
+        assertNotNull(sql);
+        assertTrue(sql.contains("principal_id IN (10,20)"),
+            "群组 id 必须插入 inClause，SQL: " + sql);
+        // 三分支仍齐全
+        assertTrue(sql.contains("principal_type = 'USER'"),
+            "USER 分支丢失，SQL: " + sql);
+        assertTrue(sql.contains("principal_type = 'ORG'"),
+            "ORG 分支丢失，SQL: " + sql);
+        assertTrue(sql.contains("revoked_at IS NULL"),
+            "revoked_at IS NULL 过滤丢失，SQL: " + sql);
     }
 }

@@ -17,10 +17,10 @@ public interface GroupAO {
     /** 更新群组名/描述。 */
     void updateGroup(Long id, String name, String description);
 
-    /** 解散群组（soft，status=0，可恢复）。同时级联 revoke 该群组所有 ACL 行。 */
+    /** 解散群组（soft，status=0，可恢复）。同时级联 revoke 该群组所有有效 ACL 行（写 revoke_reason='GROUP_DISSOLVE'）。 */
     void dissolveGroup(Long id);
 
-    /** 恢复已解散群组。复活该群组所有 revoked_at != NULL 的 ACL 行。 */
+    /** 恢复已解散群组。精确复活该群组 revoke_reason='GROUP_DISSOLVE' 的 ACL 行（不复活 MANUAL/REPLACE 行）。 */
     void restoreGroup(Long id);
 
     /** 加成员。已存在则跳过。 */

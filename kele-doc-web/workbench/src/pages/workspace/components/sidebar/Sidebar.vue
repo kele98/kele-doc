@@ -197,7 +197,9 @@ const loadSharedFolders = async () => {
   try {
     const { data } = await api.getAccessibleFolders()
     // 只保留别人分享给我的（isOwner=false），排除自己拥有的
-    const shared = (data || []).filter(f => f.isOwner === false)
+    // Bug #7：排除 ORG-public（isOrgPublic=true）。ORG-public 是组织内全员公开，
+    // 不是"明确分享给我"，混在"分享给我的"里语义错位且列表可能爆炸。
+    const shared = (data || []).filter(f => f.isOwner === false && !f.isOrgPublic)
     // 过滤掉祖先已在列表中的 folder（只保留顶层入口）
     const idSet = new Set(shared.map(f => f.id))
     sharedFolders.value = shared.filter(f => {

@@ -1,0 +1,860 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>分享对话框优化设计 v2</title>
+<style>
+  :root {
+    --theme-color: #1ea59a;
+    --theme-light-3: #4bb7ae;
+    --theme-light-7: #a5dbd7;
+    --theme-light-bg: #e8f5f3;
+    --folder-color: #ffb133;
+    --text-primary: #212930;
+    --text-regular: #606266;
+    --text-secondary: #909399;
+    --text-placeholder: #c0c4cc;
+    --border-base: #dcdfe6;
+    --border-light: #ebeef5;
+    --border-lighter: #f0f2f5;
+    --bg-page: #f6f7f8;
+    --color-success: #67c23a;
+    --color-warning: #e6a23c;
+    --color-danger: #f56c6c;
+    --color-info: #909399;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg-page);
+    color: var(--text-primary);
+    padding: 40px 24px;
+    min-height: 100vh;
+  }
+  h1 { font-size: 22px; font-weight: 600; margin-bottom: 6px; }
+  .subtitle { color: var(--text-secondary); font-size: 13px; margin-bottom: 8px; }
+  .palette { display: flex; gap: 12px; margin: 16px 0 32px; flex-wrap: wrap; }
+  .palette-item {
+    display: flex; align-items: center; gap: 8px;
+    background: #fff; padding: 6px 12px; border-radius: 6px;
+    border: 1px solid var(--border-lighter); font-size: 12px;
+  }
+  .palette-swatch { width: 14px; height: 14px; border-radius: 3px; }
+
+  .label {
+    font-size: 13px; color: var(--text-regular); margin: 32px 0 12px;
+    font-weight: 600; display: flex; align-items: center; gap: 6px;
+  }
+  .label .num {
+    background: var(--theme-color); color: #fff;
+    width: 20px; height: 20px; border-radius: 50%;
+    font-size: 11px; display: flex; align-items: center; justify-content: center;
+    font-weight: 600;
+  }
+  .row { display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap; }
+
+  /* 对话框基础样式 */
+  .dialog {
+    width: 560px;
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 12px 48px rgba(0,0,0,0.12);
+    overflow: hidden;
+    font-size: 14px;
+  }
+  .dialog-header {
+    padding: 18px 24px;
+    display: flex; align-items: center; justify-content: space-between;
+    border-bottom: 1px solid var(--border-lighter);
+  }
+  .dialog-title { font-size: 16px; font-weight: 600; }
+  .dialog-close {
+    color: var(--text-secondary); font-size: 18px; cursor: pointer;
+    width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
+    border-radius: 4px; transition: all 0.2s;
+  }
+  .dialog-close:hover { background: var(--border-lighter); }
+  .dialog-body { padding: 20px 24px 24px; }
+
+  /* === 优化版组件样式 === */
+  .folder-card {
+    background: linear-gradient(135deg, var(--theme-light-bg) 0%, #f5fbfa 100%);
+    border: 1px solid var(--theme-light-7);
+    border-radius: 8px;
+    padding: 14px 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+  .folder-icon-big {
+    width: 40px; height: 40px;
+    background: #fff;
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    box-shadow: 0 2px 6px rgba(30, 165, 154, 0.15);
+  }
+  .folder-meta { flex: 1; min-width: 0; }
+  .folder-name {
+    font-size: 15px; font-weight: 600; color: var(--text-primary);
+    overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  }
+  .folder-sub {
+    font-size: 12px; color: var(--text-secondary); margin-top: 3px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .owner-dot {
+    width: 6px; height: 6px; border-radius: 50%; background: var(--color-success);
+  }
+  .perm-badge {
+    flex-shrink: 0;
+    padding: 5px 12px;
+    border-radius: 6px;
+    background: #fff;
+    border: 1px solid var(--theme-color);
+    color: var(--theme-color);
+    font-size: 12px;
+    font-weight: 500;
+    display: flex; align-items: center; gap: 4px;
+  }
+  .perm-badge.write { border-color: var(--theme-light-3); color: var(--theme-light-3); }
+  .perm-badge.read { border-color: var(--border-base); color: var(--text-secondary); }
+
+  .section-title {
+    font-size: 13px; font-weight: 600; color: var(--text-regular);
+    margin-bottom: 10px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .section-count {
+    background: var(--border-lighter); color: var(--text-regular);
+    padding: 1px 8px; border-radius: 10px;
+    font-size: 11px; font-weight: normal;
+  }
+  .section-hint {
+    margin-left: auto; font-size: 12px; font-weight: normal; color: var(--text-placeholder);
+  }
+
+  /* 添加成员区 */
+  .add-box {
+    background: #fafbfc;
+    border: 1px solid var(--border-lighter);
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 20px;
+  }
+  .add-row { display: flex; align-items: center; gap: 8px; }
+
+  .search-select {
+    flex: 1; position: relative;
+  }
+  .search-input {
+    width: 100%; height: 36px;
+    border: 1px solid var(--border-base); border-radius: 6px;
+    padding: 0 36px 0 36px;
+    font-size: 13px; background: #fff;
+    outline: none; transition: border-color 0.2s;
+  }
+  .search-input:focus { border-color: var(--theme-color); }
+  .search-icon {
+    position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+    color: var(--text-placeholder); font-size: 14px;
+  }
+  .search-arrow {
+    position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
+    color: var(--text-placeholder); font-size: 12px;
+  }
+
+  /* 搜索下拉 */
+  .search-dropdown {
+    position: absolute; top: calc(100% + 4px); left: 0; right: 0;
+    background: #fff; border: 1px solid var(--border-light);
+    border-radius: 6px; box-shadow: 0 6px 24px rgba(0,0,0,0.1);
+    max-height: 280px; overflow-y: auto; z-index: 10;
+  }
+  .dropdown-group-title {
+    font-size: 11px; color: var(--text-placeholder);
+    padding: 8px 12px 4px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .dropdown-item {
+    padding: 8px 12px;
+    display: flex; align-items: center; gap: 10px;
+    cursor: pointer; transition: background 0.15s;
+  }
+  .dropdown-item:hover { background: var(--theme-light-bg); }
+  .dropdown-avatar {
+    width: 28px; height: 28px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-size: 12px; font-weight: 500; flex-shrink: 0;
+  }
+  .dropdown-avatar.user { background: linear-gradient(135deg, var(--theme-color), var(--theme-light-3)); }
+  .dropdown-avatar.group { background: linear-gradient(135deg, var(--folder-color), #ffc966); }
+  .dropdown-info { flex: 1; min-width: 0; }
+  .dropdown-name { font-size: 13px; color: var(--text-primary); }
+  .dropdown-account { font-size: 11px; color: var(--text-secondary); margin-top: 1px; }
+
+  /* 权限选择器（徽章 + 下拉） */
+  .perm-select {
+    position: relative; flex-shrink: 0;
+  }
+  .perm-select-trigger {
+    height: 36px;
+    padding: 0 10px 0 12px;
+    border: 1px solid var(--border-base);
+    border-radius: 6px;
+    background: #fff;
+    display: flex; align-items: center; gap: 6px;
+    font-size: 13px; cursor: pointer;
+    transition: all 0.15s;
+    min-width: 92px;
+  }
+  .perm-select-trigger:hover {
+    border-color: var(--theme-color);
+    background: var(--theme-light-bg);
+  }
+  .perm-select.open .perm-select-trigger {
+    border-color: var(--theme-color);
+    background: var(--theme-light-bg);
+  }
+  .perm-select-trigger .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .perm-select-trigger .arrow {
+    margin-left: auto;
+    color: var(--text-placeholder);
+    font-size: 10px;
+    transition: transform 0.2s;
+  }
+  .perm-select.open .perm-select-trigger .arrow {
+    transform: rotate(180deg);
+  }
+  .perm-select-trigger.read { color: var(--text-secondary); }
+  .perm-select-trigger.read .dot { background: var(--text-secondary); }
+  .perm-select-trigger.write { color: var(--theme-color); font-weight: 500; }
+  .perm-select-trigger.write .dot { background: var(--theme-color); }
+  .perm-select-trigger.manage { color: var(--color-success); font-weight: 500; }
+  .perm-select-trigger.manage .dot { background: var(--color-success); }
+
+  /* 权限下拉面板 */
+  .perm-select-dropdown {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    width: 260px;
+    background: #fff;
+    border: 1px solid var(--border-light);
+    border-radius: 8px;
+    box-shadow: 0 8px 28px rgba(0,0,0,0.12);
+    overflow: hidden;
+    z-index: 30;
+  }
+  .perm-option {
+    padding: 10px 12px;
+    display: flex; align-items: flex-start; gap: 10px;
+    cursor: pointer; transition: background 0.15s;
+    border-bottom: 1px solid var(--border-lighter);
+    position: relative;
+  }
+  .perm-option:last-child { border-bottom: none; }
+  .perm-option:hover { background: var(--theme-light-bg); }
+  .perm-option-icon {
+    width: 24px; height: 24px;
+    border-radius: 5px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; flex-shrink: 0;
+    margin-top: 1px;
+  }
+  .perm-option-icon.read { background: var(--border-lighter); color: var(--text-secondary); }
+  .perm-option-icon.write { background: var(--theme-light-bg); color: var(--theme-color); }
+  .perm-option-icon.manage { background: #f0f9eb; color: var(--color-success); }
+  .perm-option-body { flex: 1; min-width: 0; }
+  .perm-option-name {
+    font-size: 13px; font-weight: 500; color: var(--text-primary);
+    display: flex; align-items: center; gap: 6px;
+  }
+  .perm-option-name .check {
+    margin-left: auto;
+    color: var(--theme-color);
+    font-size: 13px;
+  }
+  .perm-option-desc {
+    font-size: 11px; color: var(--text-secondary);
+    margin-top: 3px; line-height: 1.5;
+  }
+
+  .add-btn {
+    padding: 0 16px; height: 36px;
+    background: var(--theme-color); color: #fff;
+    border-radius: 6px; display: flex; align-items: center; font-size: 13px;
+    font-weight: 500; gap: 4px; flex-shrink: 0;
+    transition: opacity 0.2s;
+  }
+  .add-btn.disabled { background: var(--theme-light-7); cursor: not-allowed; }
+
+  /* 成员列表 */
+  .member-list { border: 1px solid var(--border-lighter); border-radius: 8px; overflow: hidden; }
+  .member-item {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 14px;
+    background: #fff;
+    border-bottom: 1px solid var(--border-lighter);
+    transition: background 0.15s;
+  }
+  .member-item:last-child { border-bottom: none; }
+  .member-item:hover { background: #fafbfc; }
+  .member-avatar {
+    width: 32px; height: 32px; border-radius: 50%;
+    color: #fff; display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 500; flex-shrink: 0;
+  }
+  .member-avatar.user { background: linear-gradient(135deg, var(--theme-color), var(--theme-light-3)); }
+  .member-avatar.group { background: linear-gradient(135deg, var(--folder-color), #ffc966); }
+  .member-info { flex: 1; min-width: 0; }
+  .member-name {
+    font-size: 13px; font-weight: 500; color: var(--text-primary);
+    display: flex; align-items: center; gap: 6px;
+  }
+  .member-account { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
+  .member-tag {
+    font-size: 10px; padding: 1px 5px; border-radius: 3px;
+    background: var(--theme-light-bg); color: var(--theme-color);
+    font-weight: normal;
+  }
+  .member-tag.me { background: #f0f9eb; color: var(--color-success); }
+  .member-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+  .member-perm {
+    font-size: 12px; padding: 4px 10px; border-radius: 4px;
+    cursor: pointer; display: flex; align-items: center; gap: 4px;
+    border: 1px solid transparent;
+    transition: all 0.15s;
+  }
+  .member-perm:hover { opacity: 0.85; }
+  .perm-read { background: var(--border-lighter); color: var(--text-secondary); }
+  .perm-write { background: var(--theme-light-bg); color: var(--theme-color); }
+  .perm-manage { background: #f0f9eb; color: var(--color-success); }
+  .member-remove {
+    color: var(--color-danger); font-size: 12px; cursor: pointer;
+    padding: 4px 6px; opacity: 0.7; transition: opacity 0.15s;
+  }
+  .member-remove:hover { opacity: 1; }
+
+  /* 空状态 */
+  .empty-state {
+    text-align: center; padding: 40px 0;
+  }
+  .empty-icon {
+    width: 56px; height: 56px; margin: 0 auto 12px;
+    background: var(--theme-light-bg);
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--theme-color); font-size: 24px;
+  }
+  .empty-title { font-size: 14px; color: var(--text-regular); font-weight: 500; }
+  .empty-text { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
+
+  /* 转让所有权（底部折叠） */
+  .transfer-zone {
+    margin-top: 20px; padding-top: 16px;
+    border-top: 1px dashed var(--border-base);
+  }
+  .transfer-trigger {
+    display: flex; align-items: center; justify-content: space-between;
+    cursor: pointer; color: var(--text-secondary); font-size: 13px;
+    padding: 6px 0;
+  }
+  .transfer-trigger:hover { color: var(--color-danger); }
+  .transfer-trigger .arrow { transition: transform 0.2s; }
+  .transfer-trigger.open .arrow { transform: rotate(90deg); }
+  .transfer-panel {
+    margin-top: 12px; padding: 14px;
+    background: #fef0f0; border: 1px solid #fde2e2; border-radius: 6px;
+  }
+  .transfer-warn {
+    display: flex; gap: 8px; align-items: flex-start;
+    color: var(--color-danger); font-size: 12px; margin-bottom: 10px;
+  }
+  .transfer-warn-icon { font-size: 14px; flex-shrink: 0; }
+
+  .verdict {
+    background: #fff;
+    border: 1px solid var(--border-light);
+    border-left: 4px solid var(--theme-color);
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin-top: 24px;
+    font-size: 13px;
+    color: var(--text-regular);
+    line-height: 1.7;
+  }
+  .verdict strong { color: var(--theme-color); }
+  .verdict ul { margin-top: 8px; padding-left: 20px; }
+  .verdict li { margin-bottom: 4px; }
+  .verdict li b { color: var(--text-primary); }
+</style>
+</head>
+<body>
+
+<h1>分享对话框优化设计 v2</h1>
+<p class="subtitle">配色严格遵循项目主题色（青绿色 #1ea59a）+ 文件夹色（橙黄 #ffb133）+ Element Plus 标准色板</p>
+
+<div class="palette">
+  <div class="palette-item"><div class="palette-swatch" style="background:#1ea59a"></div>主题 #1ea59a</div>
+  <div class="palette-item"><div class="palette-swatch" style="background:#4bb7ae"></div>主题浅 #4bb7ae</div>
+  <div class="palette-item"><div class="palette-swatch" style="background:#a5dbd7"></div>主题更浅 #a5dbd7</div>
+  <div class="palette-item"><div class="palette-swatch" style="background:#e8f5f3"></div>主题背景</div>
+  <div class="palette-item"><div class="palette-swatch" style="background:#ffb133"></div>文件夹 #ffb133</div>
+  <div class="palette-item"><div class="palette-swatch" style="background:#67c23a"></div>成功 #67c23a</div>
+  <div class="palette-item"><div class="palette-swatch" style="background:#f56c6c"></div>危险 #f56c6c</div>
+</div>
+
+<!-- 状态 1：默认（有成员） -->
+<div class="label"><span class="num">1</span>状态一：默认打开（已有 2 个成员）</div>
+<div class="row">
+  <div class="dialog">
+    <div class="dialog-header">
+      <div class="dialog-title">分享文件夹</div>
+      <div class="dialog-close">×</div>
+    </div>
+    <div class="dialog-body">
+
+      <!-- 文件夹信息卡片 -->
+      <div class="folder-card">
+        <div class="folder-icon-big">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="#ffb133"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+        </div>
+        <div class="folder-meta">
+          <div class="folder-name">项目文档</div>
+          <div class="folder-sub">
+            <span class="owner-dot"></span>
+            所有者：admin
+          </div>
+        </div>
+        <div class="perm-badge">● 所有者</div>
+      </div>
+
+      <!-- 添加成员 -->
+      <div class="section-title">添加成员 <span class="section-hint">支持搜索用户和群组</span></div>
+      <div class="add-box">
+        <div class="add-row">
+          <div class="search-select">
+            <span class="search-icon">🔍</span>
+            <input class="search-input" placeholder="搜索用户或群组..." readonly>
+            <span class="search-arrow">▾</span>
+          </div>
+          <div class="perm-select">
+            <div class="perm-select-trigger write">
+              <span class="dot"></span>
+              <span>可写</span>
+              <span class="arrow">▾</span>
+            </div>
+          </div>
+          <div class="add-btn disabled">添加</div>
+        </div>
+      </div>
+
+      <!-- 已分享成员 -->
+      <div class="section-title">已分享成员 <span class="section-count">2 人</span></div>
+      <div class="member-list">
+        <div class="member-item">
+          <div class="member-avatar user">张</div>
+          <div class="member-info">
+            <div class="member-name">张三 <span class="member-tag">用户</span></div>
+            <div class="member-account">zhangsan</div>
+          </div>
+          <div class="member-actions">
+            <div class="member-perm perm-read">👁 只读</div>
+            <div class="member-remove">移除</div>
+          </div>
+        </div>
+        <div class="member-item">
+          <div class="member-avatar group">👥</div>
+          <div class="member-info">
+            <div class="member-name">研发组 <span class="member-tag">群组 · 5 人</span></div>
+            <div class="member-account">包含你和另外 4 人</div>
+          </div>
+          <div class="member-actions">
+            <div class="member-perm perm-manage">⚙ 管理</div>
+            <div class="member-remove">移除</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 转让所有权（折叠） -->
+      <div class="transfer-zone">
+        <div class="transfer-trigger">
+          <span>⚠ 转让所有权给其他用户</span>
+          <span class="arrow">▸</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- 状态 2：搜索中（下拉联合搜索） -->
+<div class="label"><span class="num">2</span>状态二：搜索中（用户 + 群组联合下拉）</div>
+<div class="row">
+  <div class="dialog">
+    <div class="dialog-header">
+      <div class="dialog-title">分享文件夹</div>
+      <div class="dialog-close">×</div>
+    </div>
+    <div class="dialog-body">
+      <div class="folder-card">
+        <div class="folder-icon-big">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="#ffb133"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+        </div>
+        <div class="folder-meta">
+          <div class="folder-name">项目文档</div>
+          <div class="folder-sub"><span class="owner-dot"></span>所有者：admin</div>
+        </div>
+        <div class="perm-badge">● 所有者</div>
+      </div>
+
+      <div class="section-title">添加成员</div>
+      <div class="add-box">
+        <div class="add-row">
+          <div class="search-select">
+            <span class="search-icon">🔍</span>
+            <input class="search-input" value="张" style="color:#212930">
+            <span class="search-arrow">▴</span>
+            <!-- 下拉 -->
+            <div class="search-dropdown">
+              <div class="dropdown-group-title">用户</div>
+              <div class="dropdown-item">
+                <div class="dropdown-avatar user">张</div>
+                <div class="dropdown-info">
+                  <div class="dropdown-name"><span style="color:#1ea59a;font-weight:600">张</span>三</div>
+                  <div class="dropdown-account">zhangsan</div>
+                </div>
+              </div>
+              <div class="dropdown-group-title">群组</div>
+              <div class="dropdown-item">
+                <div class="dropdown-avatar group">👥</div>
+                <div class="dropdown-info">
+                  <div class="dropdown-name">产品研发组</div>
+                  <div class="dropdown-account">5 名成员</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="perm-select">
+            <div class="perm-select-trigger write">
+              <span class="dot"></span>
+              <span>可写</span>
+              <span class="arrow">▾</span>
+            </div>
+          </div>
+          <div class="add-btn disabled">添加</div>
+        </div>
+      </div>
+
+      <div class="section-title">已分享成员 <span class="section-count">2 人</span></div>
+      <div class="member-list">
+        <div class="member-item">
+          <div class="member-avatar user">张</div>
+          <div class="member-info">
+            <div class="member-name">张三 <span class="member-tag">用户</span></div>
+            <div class="member-account">zhangsan</div>
+          </div>
+          <div class="member-actions">
+            <div class="member-perm perm-read">👁 只读</div>
+            <div class="member-remove">移除</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 状态 3：权限选择器展开 -->
+<div class="label"><span class="num">3</span>状态三：权限选择器展开（带说明的下拉）</div>
+<div class="row">
+  <div class="dialog">
+    <div class="dialog-header">
+      <div class="dialog-title">分享文件夹</div>
+      <div class="dialog-close">×</div>
+    </div>
+    <div class="dialog-body">
+      <div class="folder-card">
+        <div class="folder-icon-big">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="#ffb133"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+        </div>
+        <div class="folder-meta">
+          <div class="folder-name">项目文档</div>
+          <div class="folder-sub"><span class="owner-dot"></span>所有者：admin</div>
+        </div>
+        <div class="perm-badge">● 所有者</div>
+      </div>
+
+      <div class="section-title">添加成员</div>
+      <div class="add-box">
+        <div class="add-row">
+          <div class="search-select">
+            <span class="search-icon">🔍</span>
+            <input class="search-input" placeholder="搜索用户或群组..." readonly>
+            <span class="search-arrow">▾</span>
+          </div>
+          <div class="perm-select open">
+            <div class="perm-select-trigger write">
+              <span class="dot"></span>
+              <span>可写</span>
+              <span class="arrow">▾</span>
+            </div>
+            <div class="perm-select-dropdown">
+              <div class="perm-option">
+                <div class="perm-option-icon read">👁</div>
+                <div class="perm-option-body">
+                  <div class="perm-option-name">只读</div>
+                  <div class="perm-option-desc">仅可查看文件夹内容，不能修改</div>
+                </div>
+              </div>
+              <div class="perm-option">
+                <div class="perm-option-icon write">✏</div>
+                <div class="perm-option-body">
+                  <div class="perm-option-name">可写 <span class="check">✓</span></div>
+                  <div class="perm-option-desc">可上传、编辑、删除文件和子文件夹</div>
+                </div>
+              </div>
+              <div class="perm-option">
+                <div class="perm-option-icon manage">⚙</div>
+                <div class="perm-option-body">
+                  <div class="perm-option-name">管理</div>
+                  <div class="perm-option-desc">可管理成员和权限分配</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="add-btn disabled">添加</div>
+        </div>
+      </div>
+
+      <div class="section-title">已分享成员 <span class="section-count">2 人</span></div>
+      <div class="member-list">
+        <div class="member-item">
+          <div class="member-avatar user">张</div>
+          <div class="member-info">
+            <div class="member-name">张三 <span class="member-tag">用户</span></div>
+            <div class="member-account">zhangsan</div>
+          </div>
+          <div class="member-actions">
+            <div class="member-perm perm-read">👁 只读</div>
+            <div class="member-remove">移除</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 状态 4：空状态 -->
+<div class="label"><span class="num">4</span>状态四：空状态（还没分享给任何人）</div>
+<div class="row">
+  <div class="dialog">
+    <div class="dialog-header">
+      <div class="dialog-title">分享文件夹</div>
+      <div class="dialog-close">×</div>
+    </div>
+    <div class="dialog-body">
+      <div class="folder-card">
+        <div class="folder-icon-big">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="#ffb133"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+        </div>
+        <div class="folder-meta">
+          <div class="folder-name">新建项目</div>
+          <div class="folder-sub"><span class="owner-dot"></span>所有者：admin</div>
+        </div>
+        <div class="perm-badge">● 所有者</div>
+      </div>
+
+      <div class="section-title">添加成员</div>
+      <div class="add-box">
+        <div class="add-row">
+          <div class="search-select">
+            <span class="search-icon">🔍</span>
+            <input class="search-input" placeholder="搜索用户或群组..." readonly>
+            <span class="search-arrow">▾</span>
+          </div>
+          <div class="perm-select">
+            <div class="perm-select-trigger write">
+              <span class="dot"></span>
+              <span>可写</span>
+              <span class="arrow">▾</span>
+            </div>
+          </div>
+          <div class="add-btn disabled">添加</div>
+        </div>
+      </div>
+
+      <div class="section-title">已分享成员 <span class="section-count">0 人</span></div>
+      <div class="empty-state">
+        <div class="empty-icon">👥</div>
+        <div class="empty-title">还没有分享给任何人</div>
+        <div class="empty-text">添加第一个成员，开始协作</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 状态 5：转让所有权展开 -->
+<div class="label"><span class="num">5</span>状态五：转让所有权展开（仅所有者可见）</div>
+<div class="row">
+  <div class="dialog">
+    <div class="dialog-header">
+      <div class="dialog-title">分享文件夹</div>
+      <div class="dialog-close">×</div>
+    </div>
+    <div class="dialog-body">
+      <div class="folder-card">
+        <div class="folder-icon-big">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="#ffb133"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+        </div>
+        <div class="folder-meta">
+          <div class="folder-name">项目文档</div>
+          <div class="folder-sub"><span class="owner-dot"></span>所有者：admin</div>
+        </div>
+        <div class="perm-badge">● 所有者</div>
+      </div>
+
+      <div class="section-title">添加成员</div>
+      <div class="add-box">
+        <div class="add-row">
+          <div class="search-select">
+            <span class="search-icon">🔍</span>
+            <input class="search-input" placeholder="搜索用户或群组..." readonly>
+            <span class="search-arrow">▾</span>
+          </div>
+          <div class="perm-select">
+            <div class="perm-select-trigger write">
+              <span class="dot"></span>
+              <span>可写</span>
+              <span class="arrow">▾</span>
+            </div>
+          </div>
+          <div class="add-btn disabled">添加</div>
+        </div>
+      </div>
+
+      <div class="section-title">已分享成员 <span class="section-count">2 人</span></div>
+      <div class="member-list" style="margin-bottom:0">
+        <div class="member-item">
+          <div class="member-avatar user">张</div>
+          <div class="member-info">
+            <div class="member-name">张三 <span class="member-tag">用户</span></div>
+            <div class="member-account">zhangsan</div>
+          </div>
+          <div class="member-actions">
+            <div class="member-perm perm-read">👁 只读</div>
+            <div class="member-remove">移除</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="transfer-zone">
+        <div class="transfer-trigger open">
+          <span style="color:#f56c6c">⚠ 转让所有权给其他用户</span>
+          <span class="arrow">▸</span>
+        </div>
+        <div class="transfer-panel">
+          <div class="transfer-warn">
+            <span class="transfer-warn-icon">⚠</span>
+            <div>转让后您将失去此文件夹的管理权，且不能撤销。新所有者将获得完全控制权限。</div>
+          </div>
+          <div style="display:flex; gap:8px; margin-top:10px">
+            <input style="flex:1;height:34px;border:1px solid #dcdfe6;border-radius:6px;padding:0 12px;font-size:13px" placeholder="搜索并选择新所有者...">
+            <button style="padding:0 16px;background:#f56c6c;color:#fff;border:none;border-radius:6px;font-size:13px;cursor:pointer">确认转让</button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- 状态 6：非所有者视角（只读成员看到的） -->
+<div class="label"><span class="num">6</span>状态六：被分享者视角（只有 READ 权限的用户看到的）</div>
+<div class="row">
+  <div class="dialog">
+    <div class="dialog-header">
+      <div class="dialog-title">分享文件夹</div>
+      <div class="dialog-close">×</div>
+    </div>
+    <div class="dialog-body">
+      <div class="folder-card">
+        <div class="folder-icon-big">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="#ffb133"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+        </div>
+        <div class="folder-meta">
+          <div class="folder-name">项目文档</div>
+          <div class="folder-sub"><span class="owner-dot"></span>所有者：admin</div>
+        </div>
+        <div class="perm-badge read">👁 只读</div>
+      </div>
+
+      <!-- 只读权限下添加区禁用 -->
+      <div class="section-title">添加成员 <span class="section-hint">仅所有者和管理者可添加</span></div>
+      <div class="add-box" style="opacity:0.5; pointer-events:none">
+        <div class="add-row">
+          <div class="search-select">
+            <span class="search-icon">🔍</span>
+            <input class="search-input" placeholder="搜索用户或群组..." readonly>
+            <span class="search-arrow">▾</span>
+          </div>
+          <div class="perm-select">
+            <div class="perm-select-trigger write">
+              <span class="dot"></span>
+              <span>可写</span>
+              <span class="arrow">▾</span>
+            </div>
+          </div>
+          <div class="add-btn disabled">添加</div>
+        </div>
+      </div>
+
+      <div class="section-title">已分享成员 <span class="section-count">3 人</span></div>
+      <div class="member-list" style="margin-bottom:0">
+        <div class="member-item">
+          <div class="member-avatar user">A</div>
+          <div class="member-info">
+            <div class="member-name">admin <span class="member-tag me">所有者</span></div>
+            <div class="member-account">admin</div>
+          </div>
+          <div class="member-actions">
+            <div class="member-perm perm-manage">⚙ 管理</div>
+          </div>
+        </div>
+        <div class="member-item">
+          <div class="member-avatar user">张</div>
+          <div class="member-info">
+            <div class="member-name">张三 <span class="member-tag me">我</span></div>
+            <div class="member-account">zhangsan（你）</div>
+          </div>
+          <div class="member-actions">
+            <div class="member-perm perm-read">👁 只读</div>
+          </div>
+        </div>
+      </div>
+      <!-- 注意：只读权限下不显示转让所有权区 -->
+    </div>
+  </div>
+</div>
+
+<div class="verdict">
+  <strong>设计要点：</strong>
+  <ul>
+    <li><b>配色契合</b> — 严格用主题色 #1ea59a（青绿）做主色调，文件夹信息卡片用主题浅色背景，告别之前 mockup 用的 Element 默认蓝</li>
+    <li><b>移除 Tabs</b> — 添加 + 列表 + 转让三块在同一屏纵向排列，不用切来切去，符合 kele-doc 其他页面的扁平化风格</li>
+    <li><b>联合搜索</b> — 一个搜索框同时搜用户和群组，下拉按分组标题（用户/群组）区分，解决"群组怎么添加"的问题</li>
+    <li><b>权限徽章 + 下拉（替代分段切换器）</b> — 紧凑单选按钮，色点 + 文字 + 箭头组成触发器，颜色随权限变化（灰/青/绿）。下拉每个选项附一行说明，让用户清楚每个权限的实际影响，首次使用零学习成本</li>
+    <li><b>成员列表用头像 + 信息</b> — 用户头像用主题色渐变，群组头像用文件夹色渐变，视觉上就能区分类型</li>
+    <li><b>权限徽章带语义</b> — 只读=灰、可写=主题色、管理=绿色（成功色），所有者=主题色描边徽章</li>
+    <li><b>转让所有权折叠</b> — 默认折叠在底部虚线分隔下，避免用户误操作，展开后红色警示 + 二次确认</li>
+    <li><b>权限隔离</b> — 只读用户看到的添加区禁用、不显示转让入口，但能查看成员列表（含权限分配）</li>
+    <li><b>空状态优化</b> — 主题浅色圆形图标 + 引导文案，比纯文字"还没有分享给任何人"更有引导性</li>
+  </ul>
+</div>
+
+</body>
+</html>

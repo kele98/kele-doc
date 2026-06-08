@@ -15,6 +15,7 @@
   >
     <span class="icon iconfont icon-wenjianjia"></span>
     <span class="text" :title="data.name">{{ data.name }}</span>
+    <span v-if="data.isShared" class="sharedTag">已分享</span>
     <el-popover
       placement="bottom"
       :width="160"
@@ -205,6 +206,19 @@ onUnmounted(() => {
     font-size: 14px;
   }
 
+  .sharedTag {
+    flex-shrink: 0;
+    font-size: 11px;
+    line-height: 1;
+    padding: 3px 6px;
+    border-radius: 8px;
+    background: #ecf5ff;
+    color: #409eff;
+    border: 1px solid #d9ecff;
+    margin-left: 6px;
+    margin-right: 0;
+  }
+
   .btn {
     margin-left: auto;
     color: #6c7d8f;
@@ -213,6 +227,12 @@ onUnmounted(() => {
     display: flex;
     align-items: center;
     justify-content: flex-end;
+  }
+
+  .sharedIcon {
+    color: #409eff;
+    margin-left: 4px;
+    flex-shrink: 0;
   }
 }
 </style>

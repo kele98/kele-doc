@@ -29,7 +29,7 @@
             />
             <div class="actionBtn" @click="copyOrMoveFiles">
               <span class="iconfont icon-a-yidong2"></span>
-              <span class="text">移动/复制</span>
+              <span class="text">{{ isCurrentFolderOwner ? '移动/复制' : '复制' }}</span>
             </div>
             <div class="actionBtn delete" @click="deleteFiles">
               <span class="iconfont icon-shanchu"></span>
@@ -214,6 +214,12 @@ const searchFolderAndFileList = async () => {
 // 2.获取文件列表
 const currentFolder = computed(() => {
   return store.currentFolder
+})
+// 当前文件夹是否是自己的（非 owner 的共享文件夹下，批量按钮文案为"复制"）
+const isCurrentFolderOwner = computed(() => {
+  const folder = store.currentFolder
+  if (!folder || !store.userInfo) return true
+  return folder.isOwner !== false
 })
 const currentFolderPath = computed(() => {
   return store.currentFolderPath

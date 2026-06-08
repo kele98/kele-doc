@@ -16,6 +16,7 @@ import com.kele.core.buz.sys.dao.mapper.SysUserInfoMapper;
 import com.kele.core.buz.doc.model.vo.GroupDetailVO;
 import com.kele.core.buz.doc.model.vo.GroupListVO;
 import com.kele.core.buz.doc.model.vo.GroupMemberVO;
+import com.kele.core.buz.doc.permission.AclRevokeReason;
 import com.kele.core.other.aspect.lock.ConcurrentLock;
 import com.kele.core.other.context.LoginContext;
 import java.time.LocalDateTime;
@@ -35,8 +36,9 @@ import org.springframework.util.CollectionUtils;
 /**
  * 群组管理 AO 实现（详见 spec §4.1）。所有方法做 {@code LoginContext.isAdmin()} 校验。
  * <p>
- * 关键联动：dissolveGroup 时级联 {@code doc_file_folder_acl}（principal_type=GROUP, principal_id=groupId）所有有效行 revoked_at=now()。
- * restoreGroup 时复活上述行（revoked_at=NULL）。
+ * 关键联动：dissolveGroup 时级联 {@code doc_file_folder_acl}（principal_type=GROUP, principal_id=groupId）所有有效行
+ * revoked_at=now() + revoke_reason='GROUP_DISSOLVE'。
+ * restoreGroup 时精确复活（revoked_at=NULL）——只复活 GROUP_DISSOLVE 行，避免误复活 MANUAL/REPLACE 行（静默权限提升漏洞）。
  */
 @Slf4j
 @Service
@@ -143,17 +145,21 @@ public class GroupAOImpl implements GroupAO {
             existing.setStatus(0);
             keleGroupMapper.updateById(existing);
             // 级联 revoke 该群组所有 ACL 行（保留原 granted_by/created_at/permission；仅撤销）
+            // 写 revoke_reason='GROUP_DISSOLVE'，restoreGroup 据此精确复活
             docFileFolderAclMapper.update(null, Wrappers.<DocFileFolderAcl>lambdaUpdate()
                 .eq(DocFileFolderAcl::getPrincipalType, "GROUP")
                 .eq(DocFileFolderAcl::getPrincipalId, id)
                 .isNull(DocFileFolderAcl::getRevokedAt)
-                .set(DocFileFolderAcl::getRevokedAt, LocalDateTime.now()));
+                .set(DocFileFolderAcl::getRevokedAt, LocalDateTime.now())
+                .set(DocFileFolderAcl::getRevokeReason, AclRevokeReason.GROUP_DISSOLVE));
             return null;
         });
     }
 
     /**
-     * 恢复已解散群组 + 复活之前 revoked_at != NULL 的 ACL 行。
+     * 恢复已解散群组 + 精确复活 GROUP_DISSOLVE 类型的 ACL 行。
+     * v0.13 Bug #6 修复：原实现复活所有 revoked_at != NULL 行，会误复活 MANUAL/REPLACE 行（静默权限提升）。
+     * 改为只复活 revoke_reason='GROUP_DISSOLVE' 行。
      */
     @Override
     @ConcurrentLock(key = "kele.core.buz.doc.ao.impl.GroupAOImpl.restoreGroup(${id})")
@@ -170,15 +176,14 @@ public class GroupAOImpl implements GroupAO {
             // 恢复
             existing.setStatus(1);
             keleGroupMapper.updateById(existing);
-            // 复活该群组之前被 revoke 的 ACL 行（保留 created_at，仅清 revoked_at）
-            // 注：必须精确定位"v0.8 之前因该群组被解散而 revoke 的行"——通过 granted_by + 状态变更顺序难以判别，
-            //      简化策略：复活"principal_type=GROUP AND principal_id=id AND revoked_at != NULL"全部行；
-            //      这会复活包括"后加 ACL 又被手动 revoke"的情况，但 v1 不区分；如有冲突则人工处理。
+            // 只复活 GROUP_DISSOLVE 行（保留 created_at，清 revoked_at + revoke_reason）
             docFileFolderAclMapper.update(null, Wrappers.<DocFileFolderAcl>lambdaUpdate()
                 .eq(DocFileFolderAcl::getPrincipalType, "GROUP")
                 .eq(DocFileFolderAcl::getPrincipalId, id)
+                .eq(DocFileFolderAcl::getRevokeReason, AclRevokeReason.GROUP_DISSOLVE)
                 .isNotNull(DocFileFolderAcl::getRevokedAt)
-                .set(DocFileFolderAcl::getRevokedAt, null));
+                .set(DocFileFolderAcl::getRevokedAt, null)
+                .set(DocFileFolderAcl::getRevokeReason, null));
             return null;
         });
     }

@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>ShareDialog 优化对比</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #f6f7f8;
+    color: #212930;
+    padding: 40px 24px;
+    min-height: 100vh;
+  }
+  h1 {
+    font-size: 22px;
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+  .subtitle {
+    color: #909399;
+    font-size: 13px;
+    margin-bottom: 32px;
+  }
+  .label {
+    font-size: 13px;
+    color: #909399;
+    margin: 32px 0 12px;
+    font-weight: 600;
+  }
+  .row {
+    display: flex;
+    gap: 24px;
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .dialog {
+    width: 640px;
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.12);
+    overflow: hidden;
+    font-size: 14px;
+  }
+  .dialog-header {
+    padding: 20px 24px 16px;
+    border-bottom: 1px solid #ebeef5;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .dialog-title { font-size: 16px; font-weight: 600; }
+  .dialog-close { color: #909399; font-size: 20px; cursor: pointer; }
+  .dialog-body { padding: 20px 24px; }
+
+  /* === 当前版本（旧） === */
+  .old .headBox {
+    border-bottom: 1px solid #ebeef5;
+    padding-bottom: 12px;
+    margin-bottom: 12px;
+  }
+  .old .folderName { font-size: 16px; font-weight: 600; margin-bottom: 6px; }
+  .old .ownerRow, .old .myPermRow { font-size: 13px; color: #606266; margin-top: 4px; }
+  .old .ownerRow .label, .old .myPermRow .label { color: #909399; margin-right: 4px; }
+  .old .tabs { display: flex; gap: 24px; border-bottom: 1px solid #ebeef5; margin-top: 12px; margin-bottom: 16px; }
+  .old .tab { padding: 8px 0; color: #606266; cursor: pointer; font-size: 14px; border-bottom: 2px solid transparent; }
+  .old .tab.active { color: #409eff; border-bottom-color: #409eff; }
+  .old .row-line { display: flex; align-items: center; margin-bottom: 12px; }
+  .old .row-label { width: 60px; color: #606266; font-size: 13px; }
+  .old .select {
+    flex: 1; height: 32px; border: 1px solid #dcdfe6; border-radius: 4px;
+    display: flex; align-items: center; padding: 0 10px; color: #909399;
+    font-size: 13px; background: #fff;
+  }
+  .old .perm-select {
+    width: 110px; height: 32px; border: 1px solid #dcdfe6; border-radius: 4px;
+    display: flex; align-items: center; padding: 0 10px; font-size: 13px;
+    margin-left: 8px;
+  }
+  .old .btn {
+    margin-left: 8px; padding: 0 16px; height: 32px; background: #409eff; color: #fff;
+    border-radius: 4px; display: flex; align-items: center; font-size: 13px;
+  }
+  .old .btn.disabled { background: #a0cfff; cursor: not-allowed; }
+
+  /* === 新版本 === */
+  .new .folder-card {
+    background: linear-gradient(135deg, #ecf5ff 0%, #f0f9ff 100%);
+    border: 1px solid #d9ecff;
+    border-radius: 8px;
+    padding: 14px 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+  .new .folder-icon-big {
+    width: 40px; height: 40px;
+    background: #fff;
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    box-shadow: 0 1px 3px rgba(64, 158, 255, 0.2);
+  }
+  .new .folder-meta { flex: 1; min-width: 0; }
+  .new .folder-name {
+    font-size: 15px; font-weight: 600; color: #212930;
+    overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  }
+  .new .folder-sub {
+    font-size: 12px; color: #909399; margin-top: 2px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .new .owner-dot { width: 6px; height: 6px; border-radius: 50%; background: #67c23a; }
+  .new .perm-badge {
+    flex-shrink: 0;
+    padding: 6px 12px;
+    border-radius: 6px;
+    background: #fff;
+    border: 1px solid #67c23a;
+    color: #67c23a;
+    font-size: 12px;
+    font-weight: 500;
+    display: flex; align-items: center; gap: 4px;
+  }
+
+  .new .section-title {
+    font-size: 13px; font-weight: 600; color: #606266;
+    margin-bottom: 12px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .new .section-count {
+    background: #f0f2f5; color: #606266;
+    padding: 1px 8px; border-radius: 10px;
+    font-size: 11px; font-weight: normal;
+  }
+
+  /* 添加成员 */
+  .new .add-box {
+    background: #fafbfc;
+    border: 1px solid #ebeef5;
+    border-radius: 8px;
+    padding: 14px;
+    margin-bottom: 20px;
+  }
+  .new .add-row { display: flex; align-items: center; gap: 8px; }
+  .new .add-select {
+    flex: 1; height: 36px; border: 1px solid #dcdfe6; border-radius: 6px;
+    display: flex; align-items: center; padding: 0 12px; color: #909399;
+    font-size: 13px; background: #fff;
+  }
+  .new .perm-toggle {
+    display: flex; border: 1px solid #dcdfe6; border-radius: 6px; overflow: hidden;
+    background: #fff;
+  }
+  .new .perm-toggle-item {
+    padding: 0 12px; height: 36px;
+    display: flex; align-items: center; font-size: 13px;
+    color: #606266; cursor: pointer; border-right: 1px solid #ebeef5;
+  }
+  .new .perm-toggle-item:last-child { border-right: none; }
+  .new .perm-toggle-item.active {
+    background: #409eff; color: #fff;
+  }
+  .new .add-btn {
+    padding: 0 16px; height: 36px; background: #409eff; color: #fff;
+    border-radius: 6px; display: flex; align-items: center; font-size: 13px;
+    font-weight: 500; gap: 4px;
+  }
+
+  /* 成员列表 */
+  .new .member-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 0;
+    border-bottom: 1px solid #f0f2f5;
+  }
+  .new .member-item:last-child { border-bottom: none; }
+  .new .member-avatar {
+    width: 32px; height: 32px; border-radius: 50%;
+    background: linear-gradient(135deg, #409eff, #66b1ff);
+    color: #fff; display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 500; flex-shrink: 0;
+  }
+  .new .member-avatar.group { background: linear-gradient(135deg, #f7ba2a, #ffcc66); }
+  .new .member-info { flex: 1; min-width: 0; }
+  .new .member-name {
+    font-size: 13px; font-weight: 500; color: #212930;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .new .member-account { font-size: 12px; color: #909399; margin-top: 2px; }
+  .new .member-tag {
+    font-size: 10px; padding: 1px 5px; border-radius: 3px;
+    background: #f0f9ff; color: #409eff;
+  }
+  .new .member-actions { display: flex; align-items: center; gap: 8px; }
+  .new .member-perm {
+    font-size: 12px; padding: 3px 8px; border-radius: 4px;
+    cursor: pointer; display: flex; align-items: center; gap: 3px;
+  }
+  .new .perm-read { background: #f4f4f5; color: #909399; }
+  .new .perm-write { background: #ecf5ff; color: #409eff; }
+  .new .perm-manage { background: #f0f9eb; color: #67c23a; }
+  .new .member-remove {
+    color: #f56c6c; font-size: 12px; cursor: pointer; padding: 3px 6px;
+  }
+
+  /* 空状态 */
+  .new .empty-state {
+    text-align: center; padding: 32px 0; color: #c0c4cc;
+  }
+  .new .empty-icon {
+    width: 48px; height: 48px; margin: 0 auto 12px;
+    border: 2px dashed #dcdfe6; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    color: #c0c4cc; font-size: 20px;
+  }
+  .new .empty-text { font-size: 13px; color: #909399; }
+
+  .verdict {
+    background: #f0f9ff;
+    border: 1px solid #d9ecff;
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin-top: 24px;
+    font-size: 13px;
+    color: #1d4e89;
+    line-height: 1.7;
+  }
+  .verdict strong { color: #1565c0; }
+  .verdict ul { margin-top: 8px; padding-left: 20px; }
+  .verdict li { margin-bottom: 4px; }
+</style>
+</head>
+<body>
+
+<h1>分享文件夹对话框 — 优化对比</h1>
+<p class="subtitle">左：当前版本　右：优化版本</p>
+
+<div class="row">
+
+  <!-- 当前版本 -->
+  <div class="dialog old">
+    <div class="dialog-header">
+      <div class="dialog-title">分享文件夹</div>
+      <div class="dialog-close">×</div>
+    </div>
+    <div class="dialog-body">
+      <div class="headBox">
+        <div class="folderName">项目文档</div>
+        <div class="ownerRow">
+          <span class="label">所有者：</span>
+          <span class="value">admin</span>
+        </div>
+        <div class="myPermRow">
+          <span class="label">我的权限：</span>
+          <span style="background: #67c23a; color: #fff; padding: 1px 8px; border-radius: 4px; font-size: 12px;">所有者（管理）</span>
+        </div>
+      </div>
+      <div class="tabs">
+        <div class="tab active">添加成员</div>
+        <div class="tab">管理现有（2）</div>
+        <div class="tab">转让所有权</div>
+      </div>
+      <div class="row-line">
+        <span class="row-label">用户：</span>
+        <div class="select">搜索并选择用户</div>
+        <div class="perm-select">只读 ▾</div>
+        <div class="btn disabled">添加</div>
+      </div>
+      <div class="row-line">
+        <span class="row-label">用户组：</span>
+        <div class="select">选择组（可选）</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 优化版本 -->
+  <div class="dialog new">
+    <div class="dialog-header">
+      <div class="dialog-title">分享文件夹</div>
+      <div class="dialog-close">×</div>
+    </div>
+    <div class="dialog-body">
+      <!-- 文件夹信息卡片 -->
+      <div class="folder-card">
+        <div class="folder-icon-big">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="#f7ba2a"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+        </div>
+        <div class="folder-meta">
+          <div class="folder-name">项目文档</div>
+          <div class="folder-sub">
+            <span class="owner-dot"></span>
+            所有者：admin
+          </div>
+        </div>
+        <div class="perm-badge">● 所有者</div>
+      </div>
+
+      <!-- 添加成员区 -->
+      <div class="section-title">
+        添加成员
+      </div>
+      <div class="add-box">
+        <div class="add-row">
+          <div class="add-select">🔍 搜索用户...</div>
+          <div class="perm-toggle">
+            <div class="perm-toggle-item">只读</div>
+            <div class="perm-toggle-item active">可写</div>
+            <div class="perm-toggle-item">管理</div>
+          </div>
+          <div class="add-btn">+ 添加</div>
+        </div>
+      </div>
+
+      <!-- 已分享列表 -->
+      <div class="section-title">
+        已分享成员
+        <span class="section-count">2 人</span>
+      </div>
+      <div class="member-item">
+        <div class="member-avatar">张</div>
+        <div class="member-info">
+          <div class="member-name">
+            张三
+            <span class="member-tag">用户</span>
+          </div>
+          <div class="member-account">zhangsan</div>
+        </div>
+        <div class="member-actions">
+          <div class="member-perm perm-read">👁 只读</div>
+          <div class="member-remove">移除</div>
+        </div>
+      </div>
+      <div class="member-item">
+        <div class="member-avatar group">👥</div>
+        <div class="member-info">
+          <div class="member-name">
+            研发组
+            <span class="member-tag">群组 · 5 人</span>
+          </div>
+          <div class="member-account">包含你和另外 4 人</div>
+        </div>
+        <div class="member-actions">
+          <div class="member-perm perm-manage">⚙ 管理</div>
+          <div class="member-remove">移除</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- 第二组对比：空状态 + 转让所有权 -->
+<div class="label">空状态对比</div>
+<div class="row">
+  <div class="dialog old" style="width: 480px;">
+    <div class="dialog-header">
+      <div class="dialog-title">分享文件夹</div>
+    </div>
+    <div class="dialog-body">
+      <div style="text-align: center; color: #909399; font-size: 13px; padding: 32px 0;">
+        还没有分享给任何人
+      </div>
+    </div>
+  </div>
+
+  <div class="dialog new" style="width: 480px;">
+    <div class="dialog-header">
+      <div class="dialog-title">分享文件夹</div>
+    </div>
+    <div class="dialog-body">
+      <div class="empty-state">
+        <div class="empty-icon">👥</div>
+        <div class="empty-text">还没有分享给任何人<br>添加第一个成员开始协作</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="verdict">
+  <strong>优化要点：</strong>
+  <ul>
+    <li><strong>文件夹信息卡片化</strong> — 蓝色渐变背景 + 大图标 + 权限徽章，一眼看清自己的身份</li>
+    <li><strong>权限用图标 + 颜色区分</strong> — 只读=灰色👁、可写=蓝色✏、管理=绿色⚙，比纯文字标签更直观</li>
+    <li><strong>权限用分段切换器</strong> — 比 el-select 下拉更快，少一次点击</li>
+    <li><strong>成员列表用头像 + 信息卡</strong> — 比 el-table 更友好，像 IM 工具的群成员管理</li>
+    <li><strong>移除 Tabs 切换</strong> — 添加 + 列表 + 转让在同一屏，不用切来切去（转让可折叠在底部）</li>
+    <li><strong>空状态加图标和引导文案</strong> — 比纯文字「还没有分享给任何人」更有温度</li>
+  </ul>
+</div>
+
+</body>
+</html>
