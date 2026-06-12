@@ -58,7 +58,7 @@ const routes = [
   {
     name: 'Error',
     path: '/error',
-    component: () => import('@/pages/error/Index.vue')
+    component: () => import('@/pages/Error/Index.vue')
   }
 ]
 
