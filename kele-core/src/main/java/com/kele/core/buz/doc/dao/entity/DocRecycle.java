@@ -38,8 +38,14 @@ public class DocRecycle implements Serializable {
     @ApiModelProperty(value = "文件名")
     private String name;
 
-    @ApiModelProperty(value = "回收人ID")
+    @ApiModelProperty(value = "回收人ID（= deleterId，向后兼容）")
     private Long userId;
+
+    @ApiModelProperty(value = "删除者ID（v0.13 双视角：区分 deleter 和 owner）")
+    private Long deleterId;
+
+    @ApiModelProperty(value = "删除时的 folder ownerId 快照（v0.13 双视角）")
+    private Long ownerAtDeleteId;
 
     @ApiModelProperty(value = "回收时间")
     private LocalDateTime createAt;

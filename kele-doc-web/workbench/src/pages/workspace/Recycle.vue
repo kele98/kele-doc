@@ -82,6 +82,8 @@ import IconBtn from './components/common/IconBtn.vue'
 import View from './components/content/View.vue'
 import useLayoutChange from '@/hooks/useLayoutChange'
 
+const store = useStore()
+
 // 搜索
 const isSearch = ref(false)
 const searchText = ref('')
@@ -110,7 +112,16 @@ const { currentLayoutType, toggleLayoutType } = useLayoutChange()
 const folderList = ref([])
 const fileList = ref([])
 const isLoading = ref(true)
-// 获取收藏文件列表
+// v0.13 双视角：deleterId !== 当前用户时，name 后追加 "（由 X 删除）"，让用户区分两个视角
+const annotateDeleter = list => {
+  const me = store.userInfo && store.userInfo.id
+  return (list || []).map(item => {
+    if (item.deleterId && me && item.deleterId !== me && item.deleterName) {
+      return { ...item, name: `${item.name}（由 ${item.deleterName} 删除）` }
+    }
+    return item
+  })
+}
 const getRecycleFolderAndFileList = async () => {
   try {
     folderList.value = []
@@ -119,8 +130,8 @@ const getRecycleFolderAndFileList = async () => {
     const { data } = await api.getRecycleFolderAndFileList({
       name: currentSearchText.value
     })
-    folderList.value = data.folderList || []
-    fileList.value = data.fileList || []
+    folderList.value = annotateDeleter(data.folderList)
+    fileList.value = annotateDeleter(data.fileList)
     isLoading.value = false
   } catch (error) {
     console.log(error)

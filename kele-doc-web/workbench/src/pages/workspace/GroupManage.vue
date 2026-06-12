@@ -214,7 +214,21 @@ const onSubmit = async () => {
 }
 
 const onDissolve = async (row) => {
-  try { await ElMessageBox.confirm(`确定解散群组「${row.name}」？`, '提示', { type: 'warning' }) } catch (_) { return }
+  // v0.13 #10: 预查成员数，确认弹窗带 N（后端会级联删成员）
+  let memberCount = 0
+  try {
+    const { data } = await api.listGroupMembers(row.id)
+    memberCount = (data || []).length
+  } catch (_) { /* 忽略：按 0 处理，确认弹窗只显示基础文案 */ }
+  const suffix = memberCount > 0 ? `
+将一并移除 ${memberCount} 名成员，此操作不可恢复。` : ''
+  try {
+    await ElMessageBox.confirm(`确定解散群组「${row.name}」？${suffix}`, '提示', {
+      type: 'warning',
+      confirmButtonText: '确认解散',
+      cancelButtonText: '取消'
+    })
+  } catch (_) { return }
   try {
     await api.dissolveGroup(row.id)
     ElMessage.success('已解散')

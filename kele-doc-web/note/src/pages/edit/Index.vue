@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="editContainer">
     <div class="header">
       <div class="left">
@@ -18,22 +18,21 @@
             <span class="text">{{ saveTip }}</span>
           </span>
           <el-button @click="save">保存</el-button>
+          <el-button @click="saveCover">生成封面</el-button>
         </div>
       </div>
     </div>
     <div class="editorBox">
       <div class="toolbarBox"></div>
       <div class="editorWrap">
-        <div class="editorContent">
+        <div class="editorContent" ref="editorContentRef">
           <div
+            ref="titleRef"
             class="titleContainer"
             :contenteditable="true"
             @blur="onFileNameBlur"
-            @input="onTitleInputChange"
             @paste="onTitleInputPaste"
-          >
-            {{ fileName }}
-          </div>
+          ></div>
           <div
             class="editorContainer"
             ref="editorContainerRef"
@@ -47,8 +46,8 @@
 
 <script setup>
 import { useStore } from '../../store'
-import { useRoute, useRouter } from 'vue-router'
-import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
+import { computed, onMounted, ref, watch, nextTick } from 'vue'
 import {
   ArrowLeft,
   CircleCloseFilled,
@@ -60,10 +59,12 @@ import EditorJS from '@editorjs/editorjs'
 import DragDrop from 'editorjs-drag-drop'
 import Undo from 'editorjs-undo'
 import { i18nConfig, toolsConfig } from '@/constant'
+import { ElMessage } from 'element-plus'
+import { toPng } from 'html-to-image'
+import api from '@/api'
 
 const store = useStore()
 const route = useRoute()
-const router = useRouter()
 
 const onBack = () => {
   if (process.env.NODE_ENV === 'production') {
@@ -75,9 +76,7 @@ const onBack = () => {
 
 // 文件名
 const fileName = ref('')
-const onTitleInputChange = e => {
-  fileName.value = e.target.textContent
-}
+const titleRef = ref(null)
 const onTitleInputPaste = e => {
   e.preventDefault()
   const paste = (e.clipboardData || window.clipboardData).getData('text')
@@ -86,29 +85,26 @@ const onTitleInputPaste = e => {
   selection.deleteFromDocument()
   selection.getRangeAt(0).insertNode(document.createTextNode(paste))
   selection.collapseToEnd()
-  onTitleInputChange(e)
+  fileName.value = e.target.textContent
 }
 const onFileNameBlur = () => {
-  const text = fileName.value.trim()
+  const text = (titleRef.value?.textContent || '').trim()
   if (text) {
-    store.updateFileData({
-      name: text
-    })
+    fileName.value = text
+    store.updateFileData({ name: text })
   }
 }
 watch(
-  () => {
-    return store.fileData
-  },
+  () => store.fileData,
   val => {
     if (val && val.name) {
       fileName.value = val.name
+      nextTick(() => {
+        if (titleRef.value) titleRef.value.textContent = val.name
+      })
     }
   },
-  {
-    deep: true,
-    immediate: true
-  }
+  { deep: true, immediate: true }
 )
 
 // 编辑器
@@ -209,6 +205,40 @@ window.onbeforeunload = function () {
 onMounted(() => {
   getFileData()
 })
+const editorContentRef = ref(null)
+const saveCover = async () => {
+  const overlay = document.createElement('div')
+  overlay.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(255,255,255,0.7);z-index:9999;display:flex;align-items:center;justify-content:center;font-size:16px;color:#333;'
+  overlay.textContent = '正在生成封面...'
+  document.body.appendChild(overlay)
+  try {
+    const el = editorContentRef.value
+    const prevMargin = el.style.margin
+    el.style.margin = '0'
+    const imgData = await toPng(el, {
+      quality: 0.9,
+      backgroundColor: '#ffffff',
+      width: el.scrollWidth,
+      height: el.scrollHeight
+    })
+    el.style.margin = prevMargin
+    // 等 margin 恢复后 DOM 稳定，再关遮罩
+    await new Promise(r => setTimeout(r, 300))
+    document.body.removeChild(overlay)
+    if (!imgData.startsWith('data:image/')) {
+      ElMessage.warning('截图失败，请重试')
+      return
+    }
+    const { data } = await api.uploadImg({ imgData })
+    await store.updateFileData({ img: data })
+    ElMessage.success('封面生成成功')
+  } catch (error) {
+    console.log(error)
+    await new Promise(r => setTimeout(r, 300))
+    if (document.body.contains(overlay)) document.body.removeChild(overlay)
+    ElMessage.warning('封面生成失败')
+  }
+}
 </script>
 
 <style lang="less" scoped>

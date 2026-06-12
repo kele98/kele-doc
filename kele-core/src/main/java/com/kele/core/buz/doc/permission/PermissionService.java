@@ -21,13 +21,18 @@ import org.springframework.util.CollectionUtils;
 /**
  * 权限解析引擎。详见 spec §5.2 (app-layer walk) + §5.3 (CTE primary)。
  * <p>
- * <b>v0.7 行为</b>：本类是默认激活的 app-layer walk fallback（{@code matchIfMissing=true}）。
- * 当 {@code kele.doc.permission.cte-primary=true} 时本类被
- * {@link PermissionServiceCtePrimary} 覆盖。CTE 实现补完后再切。
+ * <b>v0.13 #16 行为</b>：单一三态开关 {@code kele.doc.permission.engine}：
+ * <ul>
+ *   <li>{@code app-walk}（默认）：本类激活</li>
+ *   <li>{@code cte}：{@link PermissionServiceCtePrimary} 激活并 {@link org.springframework.context.annotation.Primary @Primary}
+ *       覆盖本类（CTE 实现补完后再切）</li>
+ * </ul>
+ * 取消了原 {@code fallback} + {@code cte-primary} 双独立开关——双开关在 {@code fallback=true}
+ * 单设时会两边都不激活导致启动失败（无 PermissionService bean）。
  */
 @Slf4j
 @Service
-@ConditionalOnProperty(name = "kele.doc.permission.fallback", havingValue = "false", matchIfMissing = true)
+@ConditionalOnProperty(name = "kele.doc.permission.engine", havingValue = "app-walk", matchIfMissing = true)
 public class PermissionService {
 
     @Autowired private DocFileFolderMapper docFileFolderMapper;
@@ -108,13 +113,35 @@ public class PermissionService {
         return "ORG".equals(acl.getPrincipalType());
     }
 
+    /**
+     * v0.13 #3: permission-first 改造（spec §5.2 同步）。
+     * <p>
+     * 原 spec §5.2 定义 sourceRank-first（OWNER > DIRECT > GROUP > INHERITED），
+     * 同 source 再比 level。但有个反直觉场景：父 F1 同时有 USER U→MANAGE + GROUP G→READ
+     * （U∈G），U 在子 F2 查权限时——INHERITED MANAGE 反而被 GROUP READ 压住，
+     * 因为 sourceRank[GROUP]=2 > sourceRank[INHERITED]=1。结果丢了显式授予的 MANAGE。
+     * <p>
+     * 新语义（permission-first）：
+     * <ol>
+     *   <li>OWNER 永远胜出（隐式 MANAGE 不可被任何 ACL 覆盖）</li>
+     *   <li>非 OWNER 候选：先比 permission level（MANAGE > WRITE > READ）</li>
+     *   <li>level 相同再按 source rank（DIRECT > GROUP > INHERITED）</li>
+     * </ol>
+     * 上面场景：都不是 OWNER，level MANAGE > READ → 返回 INHERITED MANAGE ✓
+     */
     private PermissionResult betterOf(PermissionResult a, PermissionResult b) {
+        if (a.getSource() == PermissionResult.Source.OWNER) {
+            return a;
+        }
+        if (b.getSource() == PermissionResult.Source.OWNER) {
+            return b;
+        }
+        if (a.getLevel().getValue() != b.getLevel().getValue()) {
+            return a.getLevel().getValue() > b.getLevel().getValue() ? a : b;
+        }
         int rankA = sourceRank(a.getSource());
         int rankB = sourceRank(b.getSource());
-        if (rankA != rankB) {
-            return rankA > rankB ? a : b;
-        }
-        return a.getLevel().getValue() >= b.getLevel().getValue() ? a : b;
+        return rankA >= rankB ? a : b;
     }
 
     private int sourceRank(PermissionResult.Source s) {
@@ -129,6 +156,10 @@ public class PermissionService {
 
     /** 鉴权并抛错——MANAGE 级别以上 */
     public void requireManage(Long folderId) {
+        // v0.13 #5: admin 旁路（admin 接管孤儿 folder / transferOwner 等场景需要 admin 越权）
+        if (LoginContext.isAdmin()) {
+            return;
+        }
         Long userId = LoginContext.getUserId();
         PermissionResult r = resolve(userId, folderId);
         if (!r.getLevel().atLeast(PermissionLevel.MANAGE)) {
@@ -137,6 +168,10 @@ public class PermissionService {
     }
 
     public void requireWrite(Long folderId) {
+        // v0.13 #5: admin 旁路（admin 是超级用户，所有写权限都该过）
+        if (LoginContext.isAdmin()) {
+            return;
+        }
         Long userId = LoginContext.getUserId();
         PermissionResult r = resolve(userId, folderId);
         if (!r.getLevel().atLeast(PermissionLevel.WRITE)) {
@@ -145,6 +180,10 @@ public class PermissionService {
     }
 
     public void requireRead(Long folderId) {
+        // v0.13 #5: admin 旁路（admin 是超级用户，所有读权限都该过）
+        if (LoginContext.isAdmin()) {
+            return;
+        }
         Long userId = LoginContext.getUserId();
         PermissionResult r = resolve(userId, folderId);
         if (!r.getLevel().atLeast(PermissionLevel.READ)) {

@@ -29,6 +29,13 @@
       <artifactId>lombok</artifactId>
     </dependency>
 
+    <!-- v0.13 #1: BCrypt 密码哈希（替代 AES 对称加密）。
+         spring-boot-starter-parent 2.2.6 管理此依赖版本，无需显式指定。 -->
+    <dependency>
+      <groupId>org.springframework.security</groupId>
+      <artifactId>spring-security-crypto</artifactId>
+    </dependency>
+
     <dependency>
       <groupId>junit</groupId>
       <artifactId>junit</artifactId>

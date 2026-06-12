@@ -11,12 +11,7 @@ import lombok.EqualsAndHashCode;
 import lombok.experimental.Accessors;
 
 /**
- * <p>
- * 文档-文件收藏夹
- * </p>
- *
- * @author author
- * @since 2024-05-13
+ * 文档-文件收藏关联（per-user）
  */
 @Data
 @EqualsAndHashCode(callSuper = false)
@@ -30,11 +25,11 @@ public class DocCollectFolder implements Serializable {
     @TableId(value = "id", type = IdType.AUTO)
     private Long id;
 
-    @ApiModelProperty(value = "文件名")
-    private String name;
-
     @ApiModelProperty(value = "收藏人ID")
     private Long userId;
+
+    @ApiModelProperty(value = "文档-文件ID")
+    private Long folderId;
 
     @ApiModelProperty(value = "收藏时间")
     private LocalDateTime createAt;

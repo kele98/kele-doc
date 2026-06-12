@@ -17,12 +17,15 @@ public class DocFileFolderBaseResVO {
     @ApiModelProperty(value = "文件夹名称")
     private String name;
 
-    @ApiModelProperty(value = "是否公开")
-    private Boolean isPublic;
-
     @ApiModelProperty(value = "创建时间")
     private LocalDateTime createAt;
 
     @ApiModelProperty(value = "更新时间")
     private LocalDateTime updateAt;
+
+    @ApiModelProperty(value = "删除者ID（回收站双视角用）")
+    private Long deleterId;
+
+    @ApiModelProperty(value = "删除者名称（回收站双视角用）")
+    private String deleterName;
 }

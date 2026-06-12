@@ -68,6 +68,7 @@ class SharingE2EWorkflowTest {
     private final Map<Long, DocFileFolderAcl> acls = new HashMap<>();
     private final AtomicLong aclSeq = new AtomicLong(0);
     private final List<GroupMember> groupMembers = new ArrayList<>();
+    private final AtomicLong lastQueriedFolderId = new AtomicLong(-1);
 
     // ---------- 工具方法 ----------
 
@@ -110,13 +111,12 @@ class SharingE2EWorkflowTest {
     private void wireMocks() {
         lenient().when(folderMapper.selectById(any())).thenAnswer(inv -> {
             Long id = inv.getArgument(0);
+            lastQueriedFolderId.set(id);
             return folders.get(id);
         });
         lenient().when(aclMapper.selectList(any())).thenAnswer(inv -> {
-            // 简化：返回该 folderId 下所有 ACL（不限 isNull(revokedAt)）
-            // —— 我们在测试里用 'effectiveAcls(folderId)' 自行过滤
-            // 此处改为：返回该 folderId 下所有未撤销的 ACL
-            return effectiveAclsForAll();
+            // 模拟 DB 的 WHERE folder_id = cursor 过滤
+            return effectiveAcls(lastQueriedFolderId.get());
         });
         lenient().when(groupMemberMapper.selectList(any())).thenAnswer(inv -> {
             List<GroupMember> out = new ArrayList<>();
@@ -167,6 +167,7 @@ class SharingE2EWorkflowTest {
         acls.clear();
         groupMembers.clear();
         aclSeq.set(0);
+        lastQueriedFolderId.set(-1);
     }
 
     // ====================================================================
@@ -293,7 +294,7 @@ class SharingE2EWorkflowTest {
     class GroupSharing {
 
         @Test
-        @DisplayName("组成员继承组权限")
+        @DisplayName("组成员命中组授权（同节点 GROUP ACL → source=DIRECT）")
         void groupMemberInheritsGroupAcl() {
             wireMocks();
             createFolder(1L, null, 100L);
@@ -301,7 +302,8 @@ class SharingE2EWorkflowTest {
             addToGroup(200L, 555L);
             setLoginUser(200L);
 
-            assertEquals(PermissionResult.Source.GROUP,
+            // 同节点 GROUP ACL：isDirect=true → source=DIRECT（location-based 语义）
+            assertEquals(PermissionResult.Source.DIRECT,
                     permissionService.resolve(200L, 1L).getSource());
             assertEquals(PermissionLevel.READ,
                     permissionService.resolve(200L, 1L).getLevel());

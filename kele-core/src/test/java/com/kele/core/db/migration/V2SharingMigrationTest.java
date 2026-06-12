@@ -18,13 +18,13 @@ import org.junit.jupiter.api.Test;
 /**
  * V2 共享/权限/群组 migration 静态校验。详见 spec §3.1 + docs/db/V2。
  *
- * <p>由于本 migration 使用 MySQL 9 专属的 generated virtual column 语法
+ * <p>由于本 migration 使用 MySQL 8 generated virtual column 语法
  * （H2 / PostgreSQL 都不支持），无法用嵌入式数据库端到端跑。
  * 本测试在静态层校验：
  * <ol>
  *   <li>迁移文件存在且可读</li>
- *   <li>9 个 step 标记齐全且按顺序</li>
- *   <li>新表/新列/新索引/外键已声明</li>
+ *   <li>11 个 step 标记齐全且按顺序（Step 0 / 0.5 / 0.7 / 1 / 2 / 3 / 4 / 4.5 / 4.7 / 5 / 6 / 7 / 8）</li>
+ *   <li>新表/新列/新索引已声明，且使用 information_schema + PREPARE/EXECUTE 幂等模式</li>
  *   <li>关键数据回填（admin role=ADMIN、owner_id 回填）已声明</li>
  *   <li>迁移版本号唯一（不与 V1 冲突）</li>
  * </ol>
@@ -50,19 +50,21 @@ class V2SharingMigrationTest {
     }
 
     @Test
-    @DisplayName("9 个 step 标记齐全（Step 0 / 0.5 / 0.7 / 1 / 2 / 3 / 4 / 5 / 6 / 7 / 8）")
+    @DisplayName("13 个 step 标记齐全且顺序正确（Step 0 / 0.5 / 0.7 / 1 / 2 / 3 / 4 / 4.5 / 4.7 / 5 / 6 / 7 / 8）")
     void allStepMarkersPresent() throws IOException {
         String sql = readSql();
         String[] expectedSteps = {
-                "-- Step 0:",   // role + is_root
-                "-- Step 0.5:", // is_root 虚拟列
+                "-- Step 0:",   // sys_user_info.role
+                "-- Step 0.5:", // doc_file_folder.is_root 虚拟列
                 "-- Step 0.7:", // doc_recycle.folder_id
                 "-- Step 1:",   // owner_id 列
                 "-- Step 2:",   // owner_id 回填
                 "-- Step 3:",   // owner_id NOT NULL + idx
-                "-- Step 4:",   // isPublic → ORG ACL
-                "-- Step 5:",   // drop is_public
-                "-- Step 6:",   // doc_file_folder_acl + active_marker + uk
+                "-- Step 4:",   // doc_file_folder_acl 表创建
+                "-- Step 4.5:", // active_marker 虚拟列
+                "-- Step 4.7:", // uk_acl_active 唯一索引
+                "-- Step 5:",   // isPublic → ORG ACL 迁移
+                "-- Step 6:",   // drop is_public 列
                 "-- Step 7:",   // group 表
                 "-- Step 8:"    // group_member 表
         };
@@ -77,11 +79,15 @@ class V2SharingMigrationTest {
     }
 
     @Test
-    @DisplayName("Step 0: sys_user_info.role + id=1 是 ADMIN")
+    @DisplayName("Step 0: sys_user_info.role（information_schema 探测幂等）+ id=1 是 ADMIN")
     void step0_roleAddedAndAdminSeeded() throws IOException {
         String sql = readSql();
-        assertTrue(sql.contains("ALTER TABLE sys_user_info")
-                        && sql.contains("ADD COLUMN role"),
+        // 列存在性探测片段
+        assertTrue(sql.contains("table_name = 'sys_user_info'")
+                        && sql.contains("column_name = 'role'"),
+                "Step 0: role 列需用 information_schema.columns 探测幂等");
+        assertTrue(sql.contains("ALTER TABLE sys_user_info ADD COLUMN role")
+                        && sql.contains("VARCHAR(16) NOT NULL DEFAULT ''USER''"),
                 "Step 0: sys_user_info 必须加 role 列");
         assertTrue(sql.contains("idx_role"),
                 "Step 0: role 列需索引 idx_role");
@@ -103,8 +109,10 @@ class V2SharingMigrationTest {
     @DisplayName("Step 0.7: doc_recycle.folder_id + 数据回填 + uk_folder_user")
     void step0_7_docRecycleFolderId() throws IOException {
         String sql = readSql();
-        assertTrue(sql.contains("ALTER TABLE doc_recycle")
-                        && sql.contains("ADD COLUMN folder_id"),
+        assertTrue(sql.contains("table_name = 'doc_recycle'")
+                        && sql.contains("column_name = 'folder_id'"),
+                "Step 0.7: folder_id 列需用 information_schema.columns 探测幂等");
+        assertTrue(sql.contains("ADD COLUMN folder_id BIGINT NULL AFTER id"),
                 "Step 0.7: doc_recycle 必须加 folder_id 列");
         assertTrue(sql.contains("UPDATE doc_recycle SET folder_id = id WHERE folder_id IS NULL"),
                 "Step 0.7: 必须回填 folder_id = id");
@@ -116,7 +124,10 @@ class V2SharingMigrationTest {
     @DisplayName("Step 1-3: doc_file_folder.owner_id NOT NULL + idx_owner")
     void step1To3_ownerIdNotNullWithIndex() throws IOException {
         String sql = readSql();
-        assertTrue(sql.contains("ALTER TABLE doc_file_folder ADD COLUMN owner_id"),
+        assertTrue(sql.contains("table_name = 'doc_file_folder'")
+                        && sql.contains("column_name = 'owner_id'"),
+                "Step 1: owner_id 列需用 information_schema.columns 探测幂等");
+        assertTrue(sql.contains("ADD COLUMN owner_id BIGINT NULL AFTER creator_id"),
                 "Step 1: owner_id 列需声明");
         assertTrue(sql.contains("MODIFY COLUMN owner_id BIGINT NOT NULL"),
                 "Step 3: owner_id 需 NOT NULL");
@@ -128,34 +139,48 @@ class V2SharingMigrationTest {
     }
 
     @Test
-    @DisplayName("Step 4: 老 isPublic=true → ORG READ ACL")
-    void step4_isPublicMigratedToOrgAcl() throws IOException {
-        String sql = readSql();
-        assertTrue(sql.contains("INSERT INTO doc_file_folder_acl"),
-                "Step 4: 需把老公开文件夹导入 ACL 表");
-        assertTrue(sql.contains("'ORG'"),
-                "Step 4: 老 isPublic 应转为 ORG principal_type");
-        assertTrue(sql.contains("'READ'"),
-                "Step 4: 公开级别应为 READ");
-    }
-
-    @Test
-    @DisplayName("Step 6: doc_file_folder_acl 表 + active_marker + uk_acl_active")
-    void step6_aclTableWithActiveMarkerUnique() throws IOException {
+    @DisplayName("Step 4: doc_file_folder_acl 表 + active_marker + uk_acl_active")
+    void step4_aclTableWithActiveMarkerUnique() throws IOException {
         String sql = readSql();
         assertTrue(sql.contains("CREATE TABLE IF NOT EXISTS doc_file_folder_acl"),
-                "Step 6: doc_file_folder_acl 表需声明");
+                "Step 4: doc_file_folder_acl 表需声明");
         for (String col : new String[] {
                 "id", "folder_id", "principal_type", "principal_id",
                 "permission", "granted_by", "created_at", "revoked_at"
         }) {
             assertTrue(sql.contains(col),
-                    "Step 6: doc_file_folder_acl 需列 " + col);
+                    "Step 4: doc_file_folder_acl 需列 " + col);
         }
         assertTrue(sql.contains("active_marker"),
-                "Step 6: 需 active_marker 虚拟列");
+                "Step 4.5: 需 active_marker 虚拟列");
+        // uk_acl_active 用 information_schema.statistics 探测
+        assertTrue(sql.contains("index_name = 'uk_acl_active'"),
+                "Step 4.7: uk_acl_active 唯一索引需用 information_schema.statistics 探测幂等");
         assertTrue(sql.contains("CREATE UNIQUE INDEX uk_acl_active"),
-                "Step 6: 需 uk_acl_active 唯一索引（防同主体重复授权）");
+                "Step 4.7: 需 uk_acl_active 唯一索引（防同主体重复授权）");
+    }
+
+    @Test
+    @DisplayName("Step 5: 老 isPublic=true → ORG READ ACL（探测 is_public 列存在）")
+    void step5_isPublicMigratedToOrgAcl() throws IOException {
+        String sql = readSql();
+        assertTrue(sql.contains("INSERT IGNORE INTO doc_file_folder_acl"),
+                "Step 5: 需把老公开文件夹导入 ACL 表（INSERT IGNORE 防重跑重复）");
+        assertTrue(sql.contains("'ORG'"),
+                "Step 5: 老 isPublic 应转为 ORG principal_type");
+        assertTrue(sql.contains("'READ'"),
+                "Step 5: 公开级别应为 READ");
+        // is_public 列必须探测后再 INSERT
+        assertTrue(sql.contains("column_name = 'is_public'"),
+                "Step 5: is_public 列存在性必须用 information_schema 探测");
+    }
+
+    @Test
+    @DisplayName("Step 6: 删除 is_public 列（探测后再 DROP）")
+    void step6_dropIsPublicColumn() throws IOException {
+        String sql = readSql();
+        assertTrue(sql.contains("ALTER TABLE doc_file_folder DROP COLUMN is_public"),
+                "Step 6: 必须删 is_public 列");
     }
 
     @Test
@@ -195,7 +220,8 @@ class V2SharingMigrationTest {
         // 一些短标记可能在注释中被反复提到，但 step header 应只出现 1 次
         for (String marker : new String[] {
                 "-- Step 1:", "-- Step 2:", "-- Step 3:",
-                "-- Step 6:", "-- Step 7:", "-- Step 8:"
+                "-- Step 4:", "-- Step 5:", "-- Step 6:",
+                "-- Step 7:", "-- Step 8:"
         }) {
             int first = sql.indexOf(marker);
             assertTrue(first >= 0, "缺少标记 " + marker);

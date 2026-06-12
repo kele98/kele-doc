@@ -1,0 +1,87 @@
+{
+ "name": "kele-doc-web-monorepo",
+ "version": "1.0.0",
+ "private": true,
+ "description": "kele-doc front-end monorepo wrapper. Wraps9 independent sub-projects (workbench/doc/markdown/note/sheet/ppt/bpmn/whiteboard/mind-map/flowchart) with unified dev/build/install orchestration. No source code is moved - the root only adds orchestration scripts on top of the existing layout.",
+ "engines": {
+ "node": ">=18.0.0"
+ },
+ "scripts": {
+ "//━━ Install (one-time setup) ━━": "",
+ "install:all": "npm-run-all2 --serial install:workbench install:doc install:markdown install:note install:sheet install:ppt install:bpmn install:whiteboard install:mind-map install:flowchart",
+ "install:workbench": "cd workbench && npm install",
+ "install:doc": "cd doc && npm install",
+ "install:markdown": "cd markdown && npm install",
+ "install:note": "cd note && npm install",
+ "install:sheet": "cd sheet && npm install",
+ "install:ppt": "cd ppt && npm install",
+ "install:bpmn": "cd bpmn && npm install --legacy-peer-deps",
+ "install:whiteboard": "cd whiteboard && npm install",
+ "install:mind-map": "cd mind-map && npm install --legacy-peer-deps",
+ "install:flowchart": "cd flowchart && npm install",
+
+ "//━━ Dev (single sub-project) ━━": "",
+ "dev:workbench": "cd workbench && npm run dev",
+ "dev:doc": "cd doc && npm run dev",
+ "dev:markdown": "cd markdown && npm run dev",
+ "dev:note": "cd note && npm run dev",
+ "dev:sheet": "cd sheet && npm run dev",
+ "dev:ppt": "cd ppt && npm run dev",
+ "dev:bpmn": "cd bpmn && npm run dev",
+ "dev:whiteboard": "cd whiteboard && npm run dev",
+ "dev:mind-map": "cd mind-map && npm run serve",
+ "dev:flowchart": "cd flowchart && npm run dev",
+
+ "//━━ Dev (one-command-all - main feature) ━━": "",
+ "dev": "concurrently -k -n WB,DOC,MM,MD,SH,PP,WH,BM,NT,FC -c blue,green,yellow,magenta,cyan,red,gray,pink,white,bgYellow.black \"npm:dev:workbench\" \"npm:dev:doc\" \"npm:dev:mind-map\" \"npm:dev:markdown\" \"npm:dev:sheet\" \"npm:dev:ppt\" \"npm:dev:whiteboard\" \"npm:dev:bpmn\" \"npm:dev:note\" \"npm:dev:flowchart\"",
+ "dev:no-fc": "concurrently -k -n WB,DOC,MM,MD,SH,PP,WH,BM,NT -c blue,green,yellow,magenta,cyan,red,gray,pink,white \"npm:dev:workbench\" \"npm:dev:doc\" \"npm:dev:mind-map\" \"npm:dev:markdown\" \"npm:dev:sheet\" \"npm:dev:ppt\" \"npm:dev:whiteboard\" \"npm:dev:bpmn\" \"npm:dev:note\"",
+ "dev:modern": "concurrently -k -n WB,DOC,MD,NT,SH,PP,WH,BM -c blue,green,magenta,cyan,red,gray,pink,white \"npm:dev:workbench\" \"npm:dev:doc\" \"npm:dev:markdown\" \"npm:dev:note\" \"npm:dev:sheet\" \"npm:dev:ppt\" \"npm:dev:whiteboard\" \"npm:dev:bpmn\"",
+
+ "//━━ Build (single sub-project) ━━": "",
+ "build:workbench": "cd workbench && npm run build",
+ "build:doc": "cd doc && npm run build",
+ "build:markdown": "cd markdown && npm run build",
+ "build:note": "cd note && npm run build",
+ "build:sheet": "cd sheet && npm run build",
+ "build:ppt": "cd ppt && npm run build",
+ "build:bpmn": "cd bpmn && npm run build",
+ "build:whiteboard": "cd whiteboard && npm run build",
+ "build:mind-map": "cd mind-map && npm run build",
+ "build:flowchart": "cd flowchart && npm run build",
+
+ "//━━ Build (one-command-all - main feature) ━━": "",
+ "build": "npm-run-all2 --parallel build:workbench build:doc build:markdown build:note build:sheet build:ppt build:bpmn build:whiteboard build:mind-map build:flowchart",
+ "build:parallel": "npm-run-all2 --parallel build:workbench build:doc build:markdown build:note build:sheet build:ppt build:bpmn build:whiteboard build:mind-map build:flowchart",
+ "build:modern": "npm-run-all2 --parallel build:workbench build:doc build:markdown build:note build:sheet build:ppt build:bpmn build:whiteboard",
+
+ "//━━ Clean (cross-platform via Node) ━━": "",
+ "clean": "npm-run-all2 --parallel clean:workbench clean:doc clean:markdown clean:note clean:sheet clean:ppt clean:bpmn clean:whiteboard clean:mind-map clean:flowchart",
+ "clean:workbench": "cd workbench && node -e \"require('fs').rmSync('dist',{recursive:true,force:true});require('fs').rmSync('node_modules/.vite',{recursive:true,force:true})\"",
+ "clean:doc": "cd doc && node -e \"require('fs').rmSync('dist',{recursive:true,force:true});require('fs').rmSync('node_modules/.vite',{recursive:true,force:true})\"",
+ "clean:markdown": "cd markdown && node -e \"require('fs').rmSync('dist',{recursive:true,force:true});require('fs').rmSync('node_modules/.vite',{recursive:true,force:true})\"",
+ "clean:note": "cd note && node -e \"require('fs').rmSync('dist',{recursive:true,force:true});require('fs').rmSync('node_modules/.vite',{recursive:true,force:true})\"",
+ "clean:sheet": "cd sheet && node -e \"require('fs').rmSync('dist',{recursive:true,force:true});require('fs').rmSync('node_modules/.vite',{recursive:true,force:true})\"",
+ "clean:ppt": "cd ppt && node -e \"require('fs').rmSync('dist',{recursive:true,force:true});require('fs').rmSync('node_modules/.vite',{recursive:true,force:true})\"",
+ "clean:bpmn": "cd bpmn && node -e \"require('fs').rmSync('dist',{recursive:true,force:true});require('fs').rmSync('node_modules/.vite',{recursive:true,force:true})\"",
+ "clean:whiteboard": "cd whiteboard && node -e \"require('fs').rmSync('dist',{recursive:true,force:true});require('fs').rmSync('node_modules/.vite',{recursive:true,force:true})\"",
+ "clean:mind-map": "cd mind-map && node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
+ "clean:flowchart": "cd flowchart && node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
+
+ "//━━ Preview production build ━━": "",
+ "preview:workbench": "cd workbench && npm run preview",
+ "preview:doc": "cd doc && npm run preview",
+ "preview:markdown": "cd markdown && npm run preview",
+ "preview:note": "cd note && npm run preview",
+ "preview:sheet": "cd sheet && npm run preview",
+ "preview:ppt": "cd ppt && npm run preview",
+ "preview:bpmn": "cd bpmn && npm run preview",
+ "preview:whiteboard": "cd whiteboard && npm run preview",
+
+ "//━━ Convenience ━━": "",
+ "info": "node ./scripts/info.js"
+ },
+ "devDependencies": {
+ "concurrently": "^9.1.0",
+ "npm-run-all2": "^7.0.2"
+ }
+}

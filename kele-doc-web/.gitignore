@@ -11,6 +11,12 @@ node_modules
 dist
 dist-ssr
 *.local
+deploy-test/
+scripts/build*.log
+scripts/.build-*
+
+# Vite 临时文件
+*.timestamp-*.mjs
 
 # Editor directories and files
 .vscode/*

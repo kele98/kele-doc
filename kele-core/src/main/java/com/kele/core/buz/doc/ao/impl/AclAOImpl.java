@@ -19,6 +19,7 @@ import com.kele.core.buz.doc.model.vo.DocFileFolderAclListVO;
 import com.kele.core.other.context.LoginContext;
 import com.kele.core.buz.doc.permission.AclRevokeReason;
 import com.kele.core.buz.doc.permission.PermissionLevel;
+import com.kele.core.buz.doc.permission.PermissionService;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -38,8 +39,8 @@ import org.springframework.util.CollectionUtils;
 /**
  * ACL 管理 AO 实现（详见 spec §4.2 + §5.5）。
  * <p>
- * 鉴权：controller 的 @Authority 注解（OGNL 调 permissionService.requireManage/requireRead）
- *       在 controller 入口已做；本类不重复校验。
+ * 鉴权：v0.13 #15 统一到 AO 层 inline requireXxx（与其他 AO 一致）。
+ *       旧 @Authority 注解已标 @Deprecated，controller 不再依赖。
  * <p>
  * 关键策略：
  * - 撤销最后一条 MANAGE 时抛 CANNOT_REMOVE_LAST_MANAGE（v0.7 §5.5）
@@ -57,9 +58,11 @@ public class AclAOImpl implements AclAO {
     private final KeleGroupMapper keleGroupMapper;
     private final SysUserInfoMapper sysUserInfoMapper;
     private final TransactionTemplate transactionTemplate;
+    private final PermissionService permissionService;
 
     @Override
     public DocFileFolderAclListVO listFolderAcl(Long folderId) {
+        permissionService.requireRead(folderId);
         DocFileFolder folder = docFileFolderMapper.selectById(folderId);
         if (folder == null) {
             throw new BusinessException(ErrorCodeEnum.RESOURCE_NOT_VISIBLE.getCode(), "文件夹不存在");
@@ -130,6 +133,7 @@ public class AclAOImpl implements AclAO {
 
     @Override
     public void grantAcl(Long folderId, List<AclEntryVO> entries, boolean replace) {
+        permissionService.requireManage(folderId);
         if (CollectionUtils.isEmpty(entries)) return;
         Long grantorId = LoginContext.getUserId();
         LocalDateTime now = LocalDateTime.now();
@@ -182,6 +186,7 @@ public class AclAOImpl implements AclAO {
 
     @Override
     public void revokeAcl(Long folderId, Long aclId) {
+        permissionService.requireManage(folderId);
         DocFileFolderAcl acl = docFileFolderAclMapper.selectById(aclId);
         if (acl == null || !acl.getFolderId().equals(folderId)) {
             throw new BusinessException(ErrorCodeEnum.RESOURCE_NOT_VISIBLE.getCode(), "ACL 行不存在");
@@ -200,6 +205,7 @@ public class AclAOImpl implements AclAO {
 
     @Override
     public void updateAcl(Long folderId, Long aclId, String permission) {
+        permissionService.requireManage(folderId);
         if (!PermissionLevel.READ.name().equals(permission)
             && !PermissionLevel.WRITE.name().equals(permission)
             && !PermissionLevel.MANAGE.name().equals(permission)) {
@@ -222,6 +228,8 @@ public class AclAOImpl implements AclAO {
 
     @Override
     public void transferOwner(Long folderId, Long newOwnerId) {
+        // v0.13 #15: requireManage 兜底（与旧 @Authority 语义一致），内部再做 owner-only 细校
+        permissionService.requireManage(folderId);
         // v0.7 §4.2：转让 Owner 仅 Owner 可调（admin 旁路）
         // 之前用 @Authority(requireManage) 允许任何 MANAGE 用户转让——非 Owner 的 MANAGE 用户
         // 可偷家把 Owner 转给自己。spec §4.2 要求严格 owner-only。

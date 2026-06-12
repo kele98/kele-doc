@@ -13,7 +13,13 @@ import java.lang.annotation.Target;
  *
  * @author wuzhenhong
  * @date 2024/5/16 16:23
+ * @deprecated v0.13 #15: 声明式鉴权已迁移到 AO 层 inline requireXxx。
+ *             原因：{@code @Authority} 只支持粗粒度（requireManage/requireRead），
+ *             无法表达 owner-only 等细粒度（见 transferOwner 先例）。
+ *             新代码请直接调用 {@code permissionService.requireXxx()}。
+ *             本注解 + AuthorityAspect 保留到下一大版本再删。
  */
+@Deprecated
 @Target({ElementType.METHOD, ElementType.TYPE})
 @Retention(RetentionPolicy.RUNTIME)
 public @interface Authority {

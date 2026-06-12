@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.kele.common.enums.ErrorCodeEnum;
 import com.kele.common.exception.BusinessException;
 import com.kele.common.util.AESUtil;
+import com.kele.common.util.BCryptPasswordHasher;
 import com.kele.common.util.RedissonLock;
 import com.kele.core.buz.sys.dao.entity.SysUserInfo;
 import com.kele.core.other.constants.CommonCons;
@@ -67,7 +68,8 @@ public class SysUserInfoAOImpl implements SysUserInfoAO {
             }
             SysUserInfo userInfo = new SysUserInfo();
             userInfo.setAccount(userRegisterVO.getAccount());
-            String pwd = AESUtil.encrypt(userRegisterVO.getPassword(), CommonCons.AES_KEY);
+            // v0.13 #1: AES 对称加密 → BCrypt 单向哈希（DB 泄漏无法还原明文）
+            String pwd = BCryptPasswordHasher.hash(userRegisterVO.getPassword());
             userInfo.setPassword(pwd);
             userInfo.setCreateAt(LocalDateTime.now());
             userInfo.setVersion(0);
@@ -82,11 +84,10 @@ public class SysUserInfoAOImpl implements SysUserInfoAO {
     public void login(UserLoginVO userLoginVO, HttpServletResponse response) {
 
         String password = userLoginVO.getPassword();
-        String pwd = AESUtil.encrypt(password, CommonCons.AES_KEY);
+        // v0.13 #1: 不再用 SQL `WHERE account=? AND password=?`（BCrypt 每次 hash 带 salt，无法 SQL 等值匹配）
         SysUserInfo userInfo = sysUserInfoService.getOne(Wrappers.<SysUserInfo>lambdaQuery()
-            .eq(SysUserInfo::getAccount, userLoginVO.getAccount())
-            .eq(SysUserInfo::getPassword, pwd));
-        if (Objects.isNull(userInfo)) {
+            .eq(SysUserInfo::getAccount, userLoginVO.getAccount()));
+        if (Objects.isNull(userInfo) || !verifyAndMigrate(password, userInfo)) {
             throw new BusinessException(ErrorCodeEnum.ERROR.getCode(), "用户名或者密码错误！");
         }
 
@@ -191,16 +192,45 @@ public class SysUserInfoAOImpl implements SysUserInfoAO {
                 String.format("未获取到id为%s的登录人信息！", userId));
         }
         String oldPassword = userPwdModifyVO.getOldPassword();
-        String password = sysUserInfo.getPassword();
-        if (!password.equals(AESUtil.encrypt(oldPassword, CommonCons.AES_KEY))) {
+        // v0.13 #1: 双轨验证（BCrypt 优先，AES 兼容期）。验证成功后旧密码会被同步迁移成 BCrypt。
+        if (!verifyAndMigrate(oldPassword, sysUserInfo)) {
             throw new BusinessException(ErrorCodeEnum.ERROR.getCode(), "原秘密输入不正确！");
         }
-        String newPassword = userPwdModifyVO.getNewPassword();
-        String newPwd = AESUtil.encrypt(newPassword, CommonCons.AES_KEY);
+        String newPwd = BCryptPasswordHasher.hash(userPwdModifyVO.getNewPassword());
         SysUserInfo update = new SysUserInfo();
         update.setId(userId);
         update.setPassword(newPwd);
         sysUserInfoService.updateById(update);
+    }
+
+    /**
+     * v0.13 #1: 密码双轨验证 + 迁移。
+     * <ul>
+     *   <li>BCrypt hash（新格式）：直接 {@code BCryptPasswordEncoder.matches}。</li>
+     *   <li>AES 密文（旧格式）：解密比对，命中后用 BCrypt 重新哈希并更新 DB（透明迁移）。</li>
+     * </ul>
+     * 迁移完成后，全系统逐步转为 BCrypt-only。AES 迁移路径在所有用户至少成功登录一次后可移除。
+     */
+    private boolean verifyAndMigrate(String plainPassword, SysUserInfo userInfo) {
+        String stored = userInfo.getPassword();
+        if (BCryptPasswordHasher.isBCryptHash(stored)) {
+            return BCryptPasswordHasher.matches(plainPassword, stored);
+        }
+        // 旧 AES 密文：解密比对
+        try {
+            String legacyPlain = AESUtil.decrypt(stored, CommonCons.AES_KEY);
+            if (legacyPlain != null && legacyPlain.equals(plainPassword)) {
+                String bcryptHash = BCryptPasswordHasher.hash(plainPassword);
+                SysUserInfo update = new SysUserInfo();
+                update.setId(userInfo.getId());
+                update.setPassword(bcryptHash);
+                sysUserInfoService.updateById(update);
+                return true;
+            }
+        } catch (Exception e) {
+            log.warn("Legacy AES verify failed for userId={}, returning false", userInfo.getId(), e);
+        }
+        return false;
     }
 
     private String downOldLogin(Long userId) {

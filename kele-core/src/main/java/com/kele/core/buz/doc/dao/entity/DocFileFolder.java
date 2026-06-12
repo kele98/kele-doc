@@ -53,9 +53,6 @@ public class DocFileFolder implements Serializable {
     @ApiModelProperty(value = "文件类型，1：excel，2：word，3：pdf，4：思维导图，5：白板")
     private String fileType;
 
-    @ApiModelProperty(value = "是否被收藏，0：否，1：是")
-    private Boolean collected;
-
     @ApiModelProperty(value = "封面图")
     private String img;
 

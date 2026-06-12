@@ -32,7 +32,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, watch, computed } from 'vue'
+import { ref, reactive, watch, computed, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
 import emitter from '@/utils/eventBus'
 import api from '@/api'
@@ -65,7 +65,7 @@ const editFormRule = reactive({
   ]
 })
 
-const onShow = data => {
+const onShow = async data => {
   /*
     {
         type,// folder（文件夹）、file（文件）
@@ -77,6 +77,7 @@ const onShow = data => {
   editData.value = data
   editForm.name = data.name || ''
   dialogVisible.value = true
+  await nextTick()
   ruleFormRef.value.clearValidate('name')
 }
 emitter.on('show_name_edit_dialog', onShow)

@@ -56,6 +56,7 @@
           <span class="text">{{ saveTip }}</span>
         </span>
         <Button size="small" @click="save">保存</Button>
+        <Button size="small" @click="saveCover">生成封面</Button>
       </div>
       <div class="group-menu-item">
         <div
@@ -106,6 +107,8 @@ import useImport from '@/hooks/useImport'
 import useSlideHandler from '@/hooks/useSlideHandler'
 import type { DialogForExportTypes } from '@/types/export'
 import { useRoute, useRouter } from 'vue-router'
+import html2canvas from 'html2canvas'
+import api from '@/api'
 import Button from '@/components/Button.vue'
 
 import HotkeyDoc from './HotkeyDoc.vue'
@@ -243,6 +246,23 @@ watch(
 const setDialogForExport = (type: DialogForExportTypes) => {
   mainStore.setDialogForExport(type)
   mainMenuVisible.value = false
+}
+const saveCover = async () => {
+  try {
+    const el = document.querySelector('.layout-content-center') as HTMLElement
+    if (!el) return
+    const canvas = await html2canvas(el, { scale: 1, useCORS: true, backgroundColor: '#fff' })
+    const imgData = canvas.toDataURL('image/png')
+    if (!imgData.startsWith('data:image/')) {
+      console.error('截图失败，imgData 格式异常:', imgData.substring(0, 30))
+      return
+    }
+    const { data } = await api.uploadImg({ imgData })
+    await mainStore.updateFileData({ img: data })
+    console.log('封面生成成功')
+  } catch (error) {
+    console.log('封面生成失败', error)
+  }
 }
 
 const onImportPptist = files => {

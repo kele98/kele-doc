@@ -1,5 +1,3 @@
-version: '3.9'
-
 services:
   mysql:
     image: mysql:8.0
@@ -29,7 +27,7 @@ services:
       - kele_tools
 
   minio:
-    image: bitnami/minio
+    image: minio/minio
     container_name: kele-doc-minio
     restart: unless-stopped
     environment:
@@ -50,7 +48,6 @@ services:
     restart: unless-stopped
     environment:
       MEMORY: 1024m
-      ARGS: "--spring.profiles.active=prod --spring.config.location=classpath:/,/usr/config/kele-doc/"
     ports:
       - "2183:80"
     networks:
@@ -58,4 +55,3 @@ services:
 
 networks:
   kele_tools:
-

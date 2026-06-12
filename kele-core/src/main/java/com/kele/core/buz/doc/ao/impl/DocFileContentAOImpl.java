@@ -71,7 +71,6 @@ public class DocFileContentAOImpl extends AbstractDocFileFolderAO implements Doc
         fileFolder.setFolderCount(0);
         fileFolder.setFormat(FileFolderFormatEnum.FILE.getFormat());
         fileFolder.setFileType(createReqVO.getType());
-        fileFolder.setCollected(false);
         fileFolder.setImg(null);
         fileFolder.setVersion(0);
         Long currentUserId = LoginContext.getUserId();
@@ -155,32 +154,23 @@ public class DocFileContentAOImpl extends AbstractDocFileFolderAO implements Doc
     }
 
     /**
-     * v0.11 B1 + owner-only：源和目标文件夹必须都是当前用户的（owner）。
-     * 分享文件夹内的文件，即使有 MANAGE 权限也不允许移出。
+     * v0.13 #13: 源 WRITE + 目标父 WRITE。
+     * 移动 = 从源摘走（改源）+ 放入目标（写目标），两侧都需要 WRITE。
      */
     @Override
     public void moveFile(DocFileMoveReqVO reqVO) {
 
         Long newFolderId = reqVO.getNewFolderId();
-        Long userId = LoginContext.getUserId();
 
-        // 目标文件夹必须是自己的
+        // 移动改变文件归属结构，需要源文件和目标文件夹都是 MANAGE 权限
+        for (Long id : reqVO.getIds()) {
+            permissionService.requireManage(id);
+        }
+        permissionService.requireManage(newFolderId);
+
         DocFileFolder targetFolder = super.getById(newFolderId);
-        if (Objects.isNull(targetFolder)) {
-            throw new BusinessException(ErrorCodeEnum.RESOURCE_NOT_VISIBLE.getCode(), "目标文件夹不存在！");
-        }
-        if (!userId.equals(targetFolder.getOwnerId())) {
-            throw new BusinessException(ErrorCodeEnum.PERMISSION_DENIED.getCode(), "只能移动到自己的文件夹下");
-        }
         if (FileFolderFormatEnum.FILE.getFormat().equals(targetFolder.getFormat())) {
             throw new BusinessException(ErrorCodeEnum.ERROR.getCode(), "只能迁移到文件夹下！");
-        }
-        // 源文件的父文件夹必须是自己的
-        for (Long id : reqVO.getIds()) {
-            DocFileFolder file = super.getById(id);
-            if (Objects.isNull(file) || !userId.equals(file.getOwnerId())) {
-                throw new BusinessException(ErrorCodeEnum.PERMISSION_DENIED.getCode(), "只能移动自己的文件");
-            }
         }
 
         List<Long> idList = reqVO.getIds();
@@ -249,7 +239,6 @@ public class DocFileContentAOImpl extends AbstractDocFileFolderAO implements Doc
         fileFolders.forEach(e -> {
             e.setOldId(e.getId());
             e.setId(null);
-            e.setCollected(false);
             e.setCreateAt(currentLdt);
             e.setUpdateAt(currentLdt);
             e.setParentId(reqVO.getNewFolderId());
@@ -316,6 +305,8 @@ public class DocFileContentAOImpl extends AbstractDocFileFolderAO implements Doc
             docRecycle.setIdList(Collections.singletonList(e.getId()));
             docRecycle.setName(e.getName());
             docRecycle.setUserId(userId);
+            docRecycle.setDeleterId(userId);
+            docRecycle.setOwnerAtDeleteId(e.getOwnerId());
             docRecycle.setCreateAt(recycleTime);
             return docRecycle;
         }).collect(Collectors.toList());

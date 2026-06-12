@@ -33,7 +33,7 @@ kele:
         bucket: test
         accessKey: minio
         secretKey: Taeon@123
-    whiteUrlList: /api/login,/api/register # 白名单url，配置之后将会被登录拦截器拦截
+    whiteUrlList: /api/login # 白名单url，配置之后将会被登录拦截器拦截
     blackUrlList: /api/** # 黑名单url，配置之后将会被登录拦截器拦截
     fileUpload:
       type: minio # 文件上传类型，目前已实现local，minio，oss，接口 com.kele.core.buz.sys.service.ISysFileUploadService
@@ -53,9 +53,18 @@ kele:
     startup:
       admin-check:
         enabled: true
-    # v0.6 M5: 权限引擎实现切换（false=CTE 主路径 / true=app-layer walk fallback）
+    # v0.13 #16: 权限引擎实现切换（单一三态开关，避免双开关错配导致启动失败或 UOE）
+    # app-walk（默认）：app-layer walk（PermissionService.java，spec §5.2）
+    # cte：CTE 主路径（PermissionServiceCtePrimary.java，spec §5.3；目前为 stub，未实现）
     permission:
-      fallback: false
+      engine: app-walk
+    # #18: createFile / copyFile 失败留下的 DISPLAY 残留孤儿清理
+    # 24h 阈值：正常流程几秒内就从 DISPLAY 翻 NORMAL，能撑过 threshold 的几乎确定是孤儿
+    cleanup:
+      display:
+        enabled: true
+        threshold-hours: 24
+        cron: "0 0 3 * * ?" # 每天凌晨 3 点
 spring:
   servlet:
     multipart:

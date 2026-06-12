@@ -7,6 +7,8 @@ import com.kele.core.other.aspect.lock.ConcurrentLock;
 import com.kele.core.buz.doc.ao.AbstractDocFileFolderAO;
 import com.kele.core.buz.doc.ao.DocRecycleAO;
 import com.kele.core.buz.doc.dao.entity.DocRelationLevel;
+import com.kele.core.buz.sys.dao.entity.SysUserInfo;
+import com.kele.core.buz.sys.dao.mapper.SysUserInfoMapper;
 import com.kele.core.other.constants.RedissonLockPrefixCons;
 import com.kele.core.other.context.LoginContext;
 import com.kele.core.buz.doc.dao.entity.DocFileFolder;
@@ -24,7 +26,9 @@ import com.kele.core.other.enums.DelStatusEnum;
 import com.kele.core.other.enums.FileFolderFormatEnum;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
 import lombok.extern.slf4j.Slf4j;
@@ -55,15 +59,25 @@ public class DocRecycleAOImpl extends AbstractDocFileFolderAO implements DocRecy
     @Autowired
     private DocFileFolderAclMapper docFileFolderAclService;
 
+    @Autowired
+    private SysUserInfoMapper sysUserInfoMapper;
+
     /**
      * v0.11 m7: getId → getFolderId
+     * v0.13 双视角：在 VO 上回填 deleterId / deleterName，前端区分"我删除的"vs"他人删除在我的 folder 里"
      */
     @Override
     public DocFileAndFolderResVO getRecycleFolderAndFileList(String name) {
 
         Long userId = LoginContext.getUserId();
+        // v0.13 双视角：我删除的（deleter_id）+ 他人删除在我的 folder 里（owner_at_delete_id）
+        // owner 视角排除自己删自己：ne 只作用于 owner 子句
         List<DocRecycle> docRecycleList = docRecycleService.list(Wrappers.<DocRecycle>lambdaQuery()
-            .eq(DocRecycle::getUserId, userId)
+            .and(w -> w
+                .eq(DocRecycle::getDeleterId, userId)
+                .or(w2 -> w2
+                    .eq(DocRecycle::getOwnerAtDeleteId, userId)
+                    .ne(DocRecycle::getDeleterId, userId)))
             .like(StringUtils.hasText(name), DocRecycle::getName, name));
         DocFileAndFolderResVO docFileAndFolderResVO = new DocFileAndFolderResVO();
         docFileAndFolderResVO.setFileList(Collections.emptyList());
@@ -76,16 +90,56 @@ public class DocRecycleAOImpl extends AbstractDocFileFolderAO implements DocRecy
             .collect(Collectors.toList());
         List<DocFileFolder> folderList = docFileFolderService.listByIds(folderIdList);
 
+        // v0.13 双视角：folderId -> DocRecycle（含 deleterId/ownerAtDeleteId），用于回填到 VO
+        Map<Long, DocRecycle> folderIdToRecycleMap = new HashMap<>();
+        for (DocRecycle r : docRecycleList) {
+            if (r.getFolderId() != null) {
+                folderIdToRecycleMap.putIfAbsent(r.getFolderId(), r);
+            }
+        }
+        // 批量查 deleter 名字（owner 视角才需要展示 "由 X 删除"，但前端按 deleterId != 当前用户判断更稳）
+        List<Long> deleterIds = docRecycleList.stream()
+            .map(DocRecycle::getDeleterId)
+            .filter(Objects::nonNull)
+            .distinct()
+            .collect(Collectors.toList());
+        Map<Long, String> userIdToNameMap = new HashMap<>();
+        if (!deleterIds.isEmpty()) {
+            List<SysUserInfo> users = sysUserInfoMapper.selectBatchIds(deleterIds);
+            if (users != null) {
+                for (SysUserInfo u : users) {
+                    // 优先 userName，缺失时退回 account
+                    String displayName = StringUtils.hasText(u.getUserName()) ? u.getUserName() : u.getAccount();
+                    userIdToNameMap.put(u.getId(), displayName);
+                }
+            }
+        }
+
         List<DocFileFolderResVO> fileFolderBaseResVOList = folderList.stream()
             .filter(folder -> FileFolderFormatEnum.FOLDER.getFormat().equals(folder.getFormat()))
             .map(fileFolder -> {
                 DocFileFolderResVO resVO = new DocFileFolderResVO();
                 resVO.setId(fileFolder.getId());
                 resVO.setName(fileFolder.getName());
+                DocRecycle r = folderIdToRecycleMap.get(fileFolder.getId());
+                if (r != null) {
+                    resVO.setDeleterId(r.getDeleterId());
+                    resVO.setDeleterName(r.getDeleterId() == null ? null
+                        : userIdToNameMap.get(r.getDeleterId()));
+                }
                 return resVO;
             }).collect(Collectors.toList());
 
         List<DocFileResVO> fileList = this.filterFileList(folderList);
+        // v0.13 双视角：file VO 也回填 deleter 信息
+        for (DocFileResVO vo : fileList) {
+            DocRecycle r = folderIdToRecycleMap.get(vo.getId());
+            if (r != null) {
+                vo.setDeleterId(r.getDeleterId());
+                vo.setDeleterName(r.getDeleterId() == null ? null
+                    : userIdToNameMap.get(r.getDeleterId()));
+            }
+        }
         docFileAndFolderResVO.setFolderList(fileFolderBaseResVOList);
         docFileAndFolderResVO.setFileList(fileList);
         return docFileAndFolderResVO;
@@ -103,10 +157,13 @@ public class DocRecycleAOImpl extends AbstractDocFileFolderAO implements DocRecy
     public void restore(DocRecycleReqVO reqVO) {
         Long folderId = reqVO.getId();  // 前端传的是 folderId（文件/文件夹的业务 id）
         Long userId = LoginContext.getUserId();
-        // 按 folderId + userId 查当前用户的 recycle 记录
+        // v0.13 双视角：deleter 或 owner 都能查到并恢复
         DocRecycle docRecycleRecord = docRecycleService.getOne(Wrappers.<DocRecycle>lambdaQuery()
             .eq(DocRecycle::getFolderId, folderId)
-            .eq(DocRecycle::getUserId, userId));
+            .and(w -> w
+                .eq(DocRecycle::getDeleterId, userId)
+                .or()
+                .eq(DocRecycle::getOwnerAtDeleteId, userId)));
         if (Objects.isNull(docRecycleRecord)) {
             throw new BusinessException(ErrorCodeEnum.RESOURCE_NOT_VISIBLE.getCode(), "该文件夹已被恢复请刷新列表！");
         }
@@ -134,9 +191,13 @@ public class DocRecycleAOImpl extends AbstractDocFileFolderAO implements DocRecy
                 throw new BusinessException(ErrorCodeEnum.ERROR.getCode(),
                     String.format("id为%s的父文件夹不存在", parentId));
             }
+            // v0.13 双视角：按 deleter 或 owner 判断回收站
             boolean parentInMyRecycle = docRecycleService.lambdaQuery()
                 .eq(DocRecycle::getFolderId, parentId)
-                .eq(DocRecycle::getUserId, userId)
+                .and(w -> w
+                    .eq(DocRecycle::getDeleterId, userId)
+                    .or()
+                    .eq(DocRecycle::getOwnerAtDeleteId, userId))
                 .exists();
             if (!parentInMyRecycle) {
                 break;  // 当前用户可见的最近祖先
@@ -153,9 +214,8 @@ public class DocRecycleAOImpl extends AbstractDocFileFolderAO implements DocRecy
         List<Long> relationLevelIds = levelList.stream().map(DocRelationLevel::getId).collect(Collectors.toList());
         transactionTemplate.execute(status -> {
             // 删 recycle 记录（即"恢复"：文件 status 恒为 1，删掉 recycle 标记即可）
-            docRecycleService.remove(Wrappers.<DocRecycle>lambdaQuery()
-                .eq(DocRecycle::getUserId, userId)
-                .eq(DocRecycle::getId, recycleId));
+            // recycleId 已通过 deleterId/ownerAtDeleteId 权限校验，直接按 ID 删
+            docRecycleService.removeById(recycleId);
             docRelationLevelService.removeBatchByIds(relationLevelIds);
             Integer format = docFileFolder.getFormat();
             if(!Objects.equals(finalParentId, docFileFolder.getParentId())) {

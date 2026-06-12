@@ -11,6 +11,7 @@ import com.kele.core.buz.doc.dao.entity.KeleGroup;
 import com.kele.core.buz.sys.dao.entity.SysUserInfo;
 import com.kele.core.buz.doc.dao.mapper.DocFileFolderAclMapper;
 import com.kele.core.buz.doc.dao.mapper.GroupMemberMapper;
+import com.kele.core.buz.doc.service.IGroupMemberService;
 import com.kele.core.buz.doc.dao.mapper.KeleGroupMapper;
 import com.kele.core.buz.sys.dao.mapper.SysUserInfoMapper;
 import com.kele.core.buz.doc.model.vo.GroupDetailVO;
@@ -47,6 +48,8 @@ public class GroupAOImpl implements GroupAO {
 
     private final KeleGroupMapper keleGroupMapper;
     private final GroupMemberMapper groupMemberMapper;
+    // v0.13 #11: 用 IService.saveBatch 做 N 行的批量 INSERT，避免 forEach 单条 round-trip
+    private final IGroupMemberService groupMemberService;
     private final DocFileFolderAclMapper docFileFolderAclMapper;
     private final SysUserInfoMapper sysUserInfoMapper;
     private final TransactionTemplate transactionTemplate;
@@ -88,7 +91,7 @@ public class GroupAOImpl implements GroupAO {
                         .setJoinedAt(now))
                     .collect(Collectors.toList());
                 if (!rows.isEmpty()) {
-                    rows.forEach(groupMemberMapper::insert);
+                    groupMemberService.saveBatch(rows);
                 }
             }
             // 创建者自动成为成员
@@ -136,11 +139,11 @@ public class GroupAOImpl implements GroupAO {
         if (existing.getStatus() == 0) {
             throw new BusinessException(ErrorCodeEnum.GROUP_DISMISSED.getCode(), "群组已解散");
         }
-        if (groupMemberMapper.selectCount(Wrappers.<GroupMember>lambdaQuery()
-                .eq(GroupMember::getGroupId, id)) > 0) {
-            throw new BusinessException(ErrorCodeEnum.GROUP_HAS_MEMBERS.getCode(), "请先清空群组成员");
-        }
+        // v0.13 #10: 取消 throw，改成级联删成员（前端 onDissolve 会弹"将一并移除 N 名成员"确认）
         transactionTemplate.execute(status -> {
+            // 先级联清成员（DELETE FROM group_member WHERE group_id = id）
+            groupMemberMapper.delete(Wrappers.<GroupMember>lambdaQuery()
+                .eq(GroupMember::getGroupId, id));
             // 软撤销
             existing.setStatus(0);
             keleGroupMapper.updateById(existing);
@@ -211,7 +214,7 @@ public class GroupAOImpl implements GroupAO {
         List<GroupMember> rows = toAdd.stream()
             .map(uid -> new GroupMember().setGroupId(groupId).setUserId(uid).setJoinedAt(now))
             .collect(Collectors.toList());
-        rows.forEach(groupMemberMapper::insert);
+        groupMemberService.saveBatch(rows);
     }
 
     @Override

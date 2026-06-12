@@ -15,7 +15,8 @@
   >
     <span class="icon iconfont icon-wenjianjia"></span>
     <span class="text" :title="data.name">{{ data.name }}</span>
-    <span v-if="data.isShared" class="sharedTag">已分享</span>
+    <span v-if="data.isShared" class="sharedTag shared">已分享</span>
+    <span v-if="data.isReceived" class="sharedTag received">已接收</span>
     <el-popover
       placement="bottom"
       :width="160"
@@ -69,30 +70,40 @@ const emits = defineEmits(['click', 'actionClick', 'moved'])
 const store = useStore()
 
 const menuList = computed(() => {
-  return props.coverFolderMenuList.length > 0
-    ? props.coverFolderMenuList
-    : [
-        {
-          name: '重命名',
-          value: 'rename',
-          icon: 'icon-zhongmingming'
-        },
-        {
-          name: '复制/移动',
-          value: 'copyOrMove',
-          icon: 'icon-a-yidong2'
-        },
-        {
-          name: '分享',
-          value: 'share',
-          elIcon: 'Share'
-        },
-        {
-          name: '删除',
-          value: 'delete',
-          icon: 'icon-shanchu'
-        }
-      ]
+  if (props.coverFolderMenuList.length > 0) return props.coverFolderMenuList
+
+  // spec §10.6：分享/管 ACL 需要 MANAGE 权限；非 Owner 且非管理员不显示「分享」
+  // isOwner === false 表示"别人共享给我的"，此时只有 READ/WRITE 的不应显示分享
+  // isOwner 缺失（undefined）= 来自常规目录列表，用户天然有 MANAGE
+  const isReceived = props.data.isReceived === true
+  const notOwner = props.data.isOwner === false
+  const showShare = !(isReceived && notOwner)
+
+  const items = [
+    {
+      name: '重命名',
+      value: 'rename',
+      icon: 'icon-zhongmingming'
+    },
+    {
+      name: '复制/移动',
+      value: 'copyOrMove',
+      icon: 'icon-a-yidong2'
+    }
+  ]
+  if (showShare) {
+    items.push({
+      name: '分享',
+      value: 'share',
+      elIcon: 'Share'
+    })
+  }
+  items.push({
+    name: '删除',
+    value: 'delete',
+    icon: 'icon-shanchu'
+  })
+  return items
 })
 
 const onClick = () => {
@@ -212,11 +223,20 @@ onUnmounted(() => {
     line-height: 1;
     padding: 3px 6px;
     border-radius: 8px;
-    background: #ecf5ff;
-    color: #409eff;
-    border: 1px solid #d9ecff;
     margin-left: 6px;
     margin-right: 0;
+
+    &.shared {
+      background: #ecf5ff;
+      color: #409eff;
+      border: 1px solid #d9ecff;
+    }
+
+    &.received {
+      background: #fff7e6;
+      color: #fa8c16;
+      border: 1px solid #ffe7ba;
+    }
   }
 
   .btn {

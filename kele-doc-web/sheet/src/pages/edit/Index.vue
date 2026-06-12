@@ -26,6 +26,7 @@
             <span class="text">{{ saveTip }}</span>
           </span>
           <el-button @click="save">保存</el-button>
+          <el-button @click="saveCover">生成封面</el-button>
         </div>
       </div>
     </div>
@@ -46,6 +47,7 @@ import {
 } from '@element-plus/icons-vue'
 import api from '@/api'
 import { ElMessage } from 'element-plus'
+import html2canvas from 'html2canvas'
 
 const store = useStore()
 const route = useRoute()
@@ -188,6 +190,20 @@ window.onbeforeunload = function () {
 onMounted(() => {
   getFileData()
 })
+const saveCover = async () => {
+  try {
+    const editorEl = document.getElementById('editorBox')
+    if (!editorEl) return
+    const canvas = await html2canvas(editorEl, { scale: 1, useCORS: true })
+    const imgData = canvas.toDataURL('image/png')
+    const { data } = await api.uploadImg({ imgData })
+    await store.updateFileData({ img: data })
+    ElMessage.success('封面生成成功')
+  } catch (error) {
+    console.log(error)
+    ElMessage.warning('封面生成失败')
+  }
+}
 </script>
 
 <style lang="less" scoped>

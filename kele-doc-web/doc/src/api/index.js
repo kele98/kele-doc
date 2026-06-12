@@ -57,5 +57,10 @@ export default {
     return http.get('/getFileContent', {
       params
     })
+  },
+
+  // 上传封面图
+  uploadImg(data) {
+    return http.post('/uploadImg', data)
   }
 }

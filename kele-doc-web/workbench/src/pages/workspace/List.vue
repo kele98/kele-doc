@@ -9,6 +9,7 @@
           clearable
           :prefix-icon="Search"
           @keyup.enter="onSearch"
+          @clear="exitSearch"
         />
       </div>
       <div class="headerRight">
@@ -42,32 +43,39 @@
           </div>
           <!-- 搜索提示 -->
           <div class="searchTip" v-else-if="isSearch">
-            “{{ currentSearchText }}”的搜索结果：
+            <span class="exitSearchBtn" @click="exitSearch">← 返回</span>
+            "{{ currentSearchText }}"的搜索结果：
           </div>
-          <!-- 文件夹路径 -->
-          <FolderPath
-            v-else
-            :pathList="currentFolderPath"
-            :current="currentFolder"
-            @click="onFolderPathClick"
-          ></FolderPath>
-          <!-- <div class="folderPath" v-else>
+          <!-- 根目录：Tab 栏 -->
+          <div class="tabBar" v-else-if="isRootView">
             <div
-              class="folderItem"
-              v-for="item in currentFolderPath"
-              :key="item.id"
-              :class="{
-                isCurrent: currentFolder && currentFolder.id === item.id
-              }"
-              @click="onFolderPathClick(item)"
-            >
-              {{ item.name }}
-              <el-icon class="icon"><ArrowRight /></el-icon>
-            </div>
-          </div> -->
+              class="tabItem"
+              :class="{ active: activeTab === 'all' }"
+              @click="onTabChange('all')"
+            >全部</div>
+            <div
+              class="tabItem"
+              :class="{ active: activeTab === 'mine' }"
+              @click="onTabChange('mine')"
+            >我的</div>
+            <div
+              class="tabItem"
+              :class="{ active: activeTab === 'shared' }"
+              @click="onTabChange('shared')"
+            >分享给我</div>
+          </div>
+          <!-- 子文件夹：根目录返回 + 面包屑 -->
+          <div class="breadcrumbArea" v-else>
+            <span class="backToRoot" @click="clearCurrentNode">← 根目录</span>
+            <el-icon class="breadcrumbSeparator"><ArrowRight /></el-icon>
+            <FolderPath
+              :pathList="currentFolderPath"
+              :current="currentFolder"
+              @click="onFolderPathClick"
+            ></FolderPath>
+          </div>
         </div>
         <div class="right">
-          <!-- 操作按钮 -->
           <el-button class="marginRight" @click="createFolder" v-if="!isSearch"
             >新建文件夹</el-button
           >
@@ -101,7 +109,6 @@
         </div>
       </div>
       <div class="contentBody" @contextmenu.stop.prevent="onContextMenu">
-        <!-- 视图 -->
         <View
           :view="currentLayoutType"
           :fileList="fileList"
@@ -114,13 +121,11 @@
           @moved="reloadList"
           @deleted="reloadList"
         ></View>
-        <!-- 无数据 -->
         <NoData
           :tip="isSearch ? '搜索无结果' : '点击左上角「创建」吧'"
           :showAddIcon="!isSearch"
           v-if="!isLoading && folderList.length <= 0 && fileList.length <= 0"
         ></NoData>
-        <!-- 右键菜单 -->
         <ContextMenu
           ref="ContextMenuRef"
           @createFolder="createFolder"
@@ -151,16 +156,16 @@ import FolderPath from './components/content/FolderPath.vue'
 
 const store = useStore()
 
-// 刷新当前列表列表
-const reloadList = () => {
-  if (isSearch.value) {
-    searchFolderAndFileList()
-  } else {
-    getFolderAndFileList()
-  }
+// ==================== 根目录 Tab ====================
+const activeTab = ref('all')
+const isRootView = computed(() => !currentFolder.value)
+
+const onTabChange = (tab) => {
+  activeTab.value = tab
+  loadRootView()
 }
 
-// 1.搜索
+// ==================== 搜索 ====================
 const isSearch = ref(false)
 const searchText = ref('')
 const currentSearchText = ref('')
@@ -193,6 +198,10 @@ const resetSearch = () => {
   searchText.value = ''
   currentSearchText.value = ''
 }
+const exitSearch = () => {
+  resetSearch()
+  loadRootView()
+}
 const searchFolderAndFileList = async () => {
   try {
     folderList.value = []
@@ -211,19 +220,14 @@ const searchFolderAndFileList = async () => {
   }
 }
 
-// 2.获取文件列表
-const currentFolder = computed(() => {
-  return store.currentFolder
-})
-// 当前文件夹是否是自己的（非 owner 的共享文件夹下，批量按钮文案为"复制"）
+// ==================== 数据加载 ====================
+const currentFolder = computed(() => store.currentFolder)
 const isCurrentFolderOwner = computed(() => {
   const folder = store.currentFolder
   if (!folder || !store.userInfo) return true
   return folder.isOwner !== false
 })
-const currentFolderPath = computed(() => {
-  return store.currentFolderPath
-})
+const currentFolderPath = computed(() => store.currentFolderPath)
 const folderList = ref([])
 const fileList = ref([])
 const isLoading = ref(true)
@@ -231,92 +235,172 @@ const currentFilterType = ref('all')
 const currentSortField = ref('createAt')
 const currentSortType = ref('desc')
 
-// 获取文件夹和文件列表
+// 刷新当前列表
+const reloadList = () => {
+  if (isSearch.value) {
+    searchFolderAndFileList()
+  } else if (isRootView.value) {
+    loadRootView()
+  } else {
+    getFolderAndFileList()
+  }
+}
+
+// --- 根目录视图：合并自有 + 共享数据 ---
+let cachedOwnedFolders = []
+let cachedOwnedFiles = []
+let cachedSharedFolders = []
+let rootFolderId = null
+
+const loadRootView = async () => {
+  folderList.value = []
+  fileList.value = []
+  isLoading.value = true
+  try {
+    const requests = []
+    const needOwned = activeTab.value !== 'shared'
+    const needShared = activeTab.value !== 'mine'
+
+    if (needOwned) {
+      requests.push(
+        (async () => {
+          // 先获取根文件夹 ID
+          if (!rootFolderId) {
+            const { data: treeData } = await api.getFolderTree({ folderId: '' })
+            if (treeData && treeData.length > 0) {
+              rootFolderId = treeData[0].id
+            }
+          }
+          if (!rootFolderId) return
+          const { data } = await api.getFolderAndFileList({
+            folderId: rootFolderId,
+            fileType: currentFilterType.value === 'all' ? '' : currentFilterType.value,
+            sortField: currentSortField.value,
+            sortType: currentSortType.value
+          })
+          cachedOwnedFolders = data.folderList || []
+          cachedOwnedFiles = (data.fileList || []).map(item => ({ ...item, checked: false }))
+        })()
+      )
+    }
+    if (needShared) {
+      requests.push(
+        api.getAccessibleFolders().then(({ data }) => {
+          const shared = (data || []).filter(f => f.isOwner === false && !f.isOrgPublic)
+          cachedSharedFolders = dedupSharedFolders(shared)
+        })
+      )
+    }
+    await Promise.all(requests)
+
+    // 根据 Tab 合并数据
+    if (activeTab.value === 'all') {
+      const ownedIds = new Set(cachedOwnedFolders.map(f => f.id))
+      folderList.value = [
+        ...cachedOwnedFolders.map(f => ({ ...f })),
+        // 去重 + 标记已接收（同时清除 isShared，避免双标签）
+        ...cachedSharedFolders.filter(f => !ownedIds.has(f.id)).map(f => ({ ...f, isReceived: true, isShared: false }))
+      ]
+      fileList.value = cachedOwnedFiles
+    } else if (activeTab.value === 'mine') {
+      folderList.value = cachedOwnedFolders.map(f => ({ ...f }))
+      fileList.value = cachedOwnedFiles
+    } else {
+      folderList.value = cachedSharedFolders.map(f => ({ ...f, isReceived: true, isShared: false }))
+      fileList.value = []
+    }
+  } catch (error) {
+    console.log(error)
+  } finally {
+    isLoading.value = false
+  }
+}
+
+// 去重：移除祖先已在列表中的 folder（只保留顶层入口）
+const dedupSharedFolders = (folders) => {
+  const idSet = new Set(folders.map(f => f.id))
+  return folders.filter(f => {
+    let pid = f.parentId
+    while (pid && pid !== 0) {
+      if (idSet.has(pid)) return false
+      const parent = folders.find(s => s.id === pid)
+      pid = parent ? parent.parentId : 0
+    }
+    return true
+  })
+}
+
+// --- 子文件夹视图：原有逻辑 ---
 const getFolderAndFileList = async () => {
   try {
-    if (isSearch.value) return
+    if (isSearch.value || !currentFolder.value) return
     folderList.value = []
     fileList.value = []
     isLoading.value = true
     const { data } = await api.getFolderAndFileList({
-      folderId: currentFolder.value ? currentFolder.value.id : '',
-      fileType:
-        currentFilterType.value === 'all' ? '' : currentFilterType.value,
+      folderId: currentFolder.value.id,
+      fileType: currentFilterType.value === 'all' ? '' : currentFilterType.value,
       sortField: currentSortField.value,
       sortType: currentSortType.value
     })
-    if (currentFolder.value === null) {
-      const folder = data.folderList[0]
-      store.setCurrentFolder(folder)
-      store.setCurrentFolderPath([folder])
-      return
-    }
     folderList.value = data.folderList || []
-    fileList.value = (data.fileList || []).map(item => {
-      return {
-        ...item,
-        checked: false
-      }
-    })
+    fileList.value = (data.fileList || []).map(item => ({
+      ...item,
+      checked: false
+    }))
     isLoading.value = false
   } catch (error) {
     console.log(error)
     isLoading.value = false
   }
 }
-emitter.on('refresh_list', getFolderAndFileList)
+
+emitter.on('refresh_list', reloadList)
+
 // 监听当前所在文件夹，改变了刷新列表数据
 watch(
+  () => currentFolder.value,
   () => {
-    return currentFolder.value
-  },
-  () => {
-    if (!currentFolder.value) {
-      return
-    }
-    // 如果当前处于搜索状态
     if (isSearch.value) {
       resetSearch()
     }
-    getFolderAndFileList()
+    if (currentFolder.value) {
+      getFolderAndFileList()
+    } else {
+      loadRootView()
+    }
   },
-  {
-    immediate: true
-  }
+  { immediate: true }
 )
 
-// 修改过滤类型
+// 过滤/排序
 const onFilterTypeChange = val => {
   currentFilterType.value = val
   reloadList()
 }
-// 排序改变
 const onSortFieldChange = val => {
   currentSortField.value = val
-  getFolderAndFileList()
+  reloadList()
 }
 const onsortTypeChange = val => {
   currentSortType.value = val
-  getFolderAndFileList()
+  reloadList()
 }
 
+// ==================== 导航 ====================
 // 文件夹路径点击
 const onFolderPathClick = folder => {
   store.setCurrentFolder(folder)
-  const index = currentFolderPath.value.findIndex(item => {
-    return item.id === folder.id
-  })
+  const index = currentFolderPath.value.findIndex(item => item.id === folder.id)
   store.setCurrentFolderPath(currentFolderPath.value.slice(0, index + 1))
 }
 
-// 文件夹点击
+// 文件夹点击（进入子目录）
 const onFolderClick = async (folder, isFile = false) => {
   try {
     let path = []
     if (isSearch.value) {
-      const { data } = await api.getFolderPath({
-        folderId: folder.id
-      })
+      const { data } = await api.getFolderPath({ folderId: folder.id })
       if (isFile) {
         path = data.slice(0, -1)
         folder = path[path.length - 1]
@@ -333,29 +417,20 @@ const onFolderClick = async (folder, isFile = false) => {
   }
 }
 
-// 清空当前所在的文件夹信息
 const clearCurrentNode = () => {
   store.setCurrentFolderPath([])
   store.setCurrentFolder(null)
 }
 
-// 3.文件多选
+// ==================== 多选 ====================
 const isCheckAll = ref(false)
 const checkedFileList = computed(() => {
   return fileList.value
-    .filter(item => {
-      return item.checked
-    })
-    .map(item => {
-      return {
-        ...item
-      }
-    })
+    .filter(item => item.checked)
+    .map(item => ({ ...item }))
 })
 watch(
-  () => {
-    return checkedFileList.value.length
-  },
+  () => checkedFileList.value.length,
   val => {
     const allLength = fileList.value.length
     isCheckAll.value = allLength > 0 && val >= allLength
@@ -367,31 +442,21 @@ const isIndeterminate = computed(() => {
   return allLength > 0 && checkedLength > 0 && checkedLength < allLength
 })
 const onCheckAllChange = val => {
-  fileList.value.forEach(item => {
-    item.checked = val
-  })
+  fileList.value.forEach(item => { item.checked = val })
 }
-const exitSelect = () => {
-  onCheckAllChange(false)
-}
-// 移动或复制多个文件
+const exitSelect = () => { onCheckAllChange(false) }
 const copyOrMoveFiles = async () => {
   try {
     emitter.emit('show_move_dialog', {
       type: RESOURCE_TYPES.FILE,
       name: '所选文件',
-      ids: checkedFileList.value.map(item => {
-        return item.id
-      }),
-      callback: () => {
-        reloadList()
-      }
+      ids: checkedFileList.value.map(item => item.id),
+      callback: () => { reloadList() }
     })
   } catch (error) {
     console.log(error)
   }
 }
-// 删除多个文件
 const deleteFiles = async () => {
   ElMessageBox.confirm(`是否确认删除【所选文件】？`, '删除文件', {
     confirmButtonText: '确认',
@@ -400,14 +465,9 @@ const deleteFiles = async () => {
   }).then(async () => {
     try {
       await api.deleteFile({
-        ids: checkedFileList.value.map(item => {
-          return item.id
-        })
+        ids: checkedFileList.value.map(item => item.id)
       })
-      ElMessage({
-        type: 'success',
-        message: '删除成功'
-      })
+      ElMessage({ type: 'success', message: '删除成功' })
       reloadList()
     } catch (error) {
       console.log(error)
@@ -415,7 +475,7 @@ const deleteFiles = async () => {
   })
 }
 
-// 4.右键菜单
+// ==================== 右键菜单 ====================
 const ContextMenuRef = ref(null)
 const onContextMenu = e => {
   emitContextmenuEvent()
@@ -424,27 +484,38 @@ const onContextMenu = e => {
   }
 }
 const hideContextMenu = () => {
-  if (ContextMenuRef.value) {
-    ContextMenuRef.value.hide()
-  }
+  if (ContextMenuRef.value) ContextMenuRef.value.hide()
 }
 emitter.on('contextmenu', hideContextMenu)
 
-// 5.创建文件夹
+// ==================== 创建文件夹 ====================
 const createFolder = () => {
+  // 根目录时临时设置 currentFolder 为根文件夹，让 NameEditDialog 能拿到 parentFolderId
+  const wasRootView = isRootView.value
+  if (wasRootView && rootFolderId) {
+    store.setCurrentFolder({ id: rootFolderId, name: '根目录' })
+  }
   emitter.emit('show_name_edit_dialog', {
     type: RESOURCE_TYPES.FOLDER,
     callback: data => {
-      onFolderClick(data)
+      if (wasRootView) {
+        // 创建后回到根目录并刷新列表
+        store.setCurrentFolder(null)
+        store.setCurrentFolderPath([])
+        rootFolderId = null // 清缓存，强制重新加载
+        loadRootView()
+      } else {
+        onFolderClick(data)
+      }
     }
   })
 }
 
-// 6.展示类型
+// ==================== 布局 ====================
 const { currentLayoutType, toggleLayoutType } = useLayoutChange()
 
 onUnmounted(() => {
-  emitter.off('refresh_list', getFolderAndFileList)
+  emitter.off('refresh_list', reloadList)
   emitter.off('contextmenu', hideContextMenu)
 })
 </script>
@@ -496,6 +567,70 @@ onUnmounted(() => {
           height: 40px;
           display: flex;
           align-items: center;
+
+          .exitSearchBtn {
+            color: var(--theme-color);
+            cursor: pointer;
+            margin-right: 12px;
+            font-size: 14px;
+
+            &:hover {
+              opacity: 0.8;
+            }
+          }
+        }
+
+        .tabBar {
+          display: flex;
+          align-items: center;
+          height: 40px;
+          gap: 8px;
+
+          .tabItem {
+            padding: 6px 20px;
+            font-size: 14px;
+            color: #606266;
+            cursor: pointer;
+            user-select: none;
+            border-radius: 16px;
+            transition: all 0.2s;
+
+            &:hover {
+              color: var(--theme-color);
+              background-color: var(--el-fill-color-light);
+            }
+
+            &.active {
+              color: #fff;
+              font-weight: 600;
+              background-color: var(--theme-color);
+            }
+          }
+        }
+
+        .breadcrumbArea {
+          display: flex;
+          align-items: center;
+          height: 40px;
+          gap: 4px;
+
+          .backToRoot {
+            color: var(--theme-color);
+            font-size: 14px;
+            cursor: pointer;
+            user-select: none;
+            white-space: nowrap;
+            flex-shrink: 0;
+
+            &:hover {
+              opacity: 0.8;
+            }
+          }
+
+          .breadcrumbSeparator {
+            color: #c0c4cc;
+            flex-shrink: 0;
+          }
         }
 
         .selectActionBox {
@@ -520,44 +655,8 @@ onUnmounted(() => {
               }
             }
 
-            .iconfont {
-            }
-
             .text {
               font-size: 14px;
-            }
-          }
-        }
-
-        .folderPath {
-          display: flex;
-          height: 40px;
-          display: flex;
-          align-items: center;
-
-          .folderItem {
-            color: #9aa5b8;
-            font-weight: 400;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            user-select: none;
-
-            &:hover {
-              color: #212930;
-            }
-
-            .icon {
-              margin-top: 2px;
-            }
-
-            &.isCurrent {
-              color: #212930;
-              cursor: default;
-
-              .icon {
-                display: none;
-              }
             }
           }
         }

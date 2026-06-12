@@ -80,9 +80,15 @@ const ImgPreviewRef = ref(null)
 let beingDragNode = null
 const initChart = data => {
   data = transformData(data)
+  // 后端已区分"我的文件"和"被分享的文件夹"虚拟节点
+  // 多个顶层节点时包在一个虚拟根下
+  const rootData = data.length === 1 ? data[0] : {
+    data: { text: '全部文件' },
+    children: data
+  }
   mindMap = new MindMap({
     el: contentBodyRef.value,
-    data: data[0],
+    data: rootData,
     tagsColorMap: {
       文件夹: '#1ea59a'
     },

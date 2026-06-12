@@ -244,7 +244,6 @@ public class DocFileFolderAOImpl extends AbstractDocFileFolderAO implements DocF
         docFileFolder.setFolderCount(0);
         docFileFolder.setFormat(FileFolderFormatEnum.FOLDER.getFormat());
         docFileFolder.setFileType("");
-        docFileFolder.setCollected(false);
         docFileFolder.setVersion(0);
         Long currentUserId = LoginContext.getUserId();
         docFileFolder.setCreatorId(currentUserId);
@@ -314,6 +313,8 @@ public class DocFileFolderAOImpl extends AbstractDocFileFolderAO implements DocF
             docRecycle.setIdList(Collections.singletonList(folder.getId()));
             docRecycle.setName(folder.getName());  // 每个 child 用自己的 name，避免回收站列表空白
             docRecycle.setUserId(userId);
+            docRecycle.setDeleterId(userId);
+            docRecycle.setOwnerAtDeleteId(folder.getOwnerId());
             docRecycle.setCreateAt(now);
             return docRecycle;
         }).collect(Collectors.toList());
@@ -330,9 +331,9 @@ public class DocFileFolderAOImpl extends AbstractDocFileFolderAO implements DocF
     }
 
     /**
-     * v0.7 §5.4.b 重构：源 Owner-only + 目标父 Owner-only + 循环引用防护
-     * 只有 owner 能移动文件夹，MANAGE 权限仅允许内部操作（创建/删除子项）。
-     * 若需转移归属，应使用"转让所有权"功能。
+     * v0.13 #13: 源 WRITE + 目标父 WRITE + 循环引用防护。
+     * 移动 = 从源摘走（改源）+ 放入目标（写目标），两侧都需要 WRITE。
+     * WRITE ⊂ MANAGE ⊂ OWNER，owner 隐含 WRITE，回归不破。
      */
     @Override
     @ConcurrentLock(key = RedissonLockPrefixCons.MOVE_FOLDER + "${moveVO.id}")
@@ -342,23 +343,13 @@ public class DocFileFolderAOImpl extends AbstractDocFileFolderAO implements DocF
         if (id.equals(newFolderId)) {
             throw new BusinessException(ErrorCodeEnum.ERROR.getCode(), "不能移动自身到自身下");
         }
-        // 只有 owner 才能移动文件夹
-        Long userId = LoginContext.getUserId();
-        DocFileFolder sourceFolder = docFileFolderService.getById(id);
-        if (Objects.isNull(sourceFolder) || !userId.equals(sourceFolder.getOwnerId())) {
-            throw new BusinessException(ErrorCodeEnum.PERMISSION_DENIED.getCode(), "只有所有者才能移动文件夹");
-        }
-        // 目标文件夹也必须是自己的
-        DocFileFolder targetFolder = docFileFolderService.getById(newFolderId);
-        if (Objects.isNull(targetFolder) || !userId.equals(targetFolder.getOwnerId())) {
-            throw new BusinessException(ErrorCodeEnum.PERMISSION_DENIED.getCode(), "只能移动到自己的文件夹下");
-        }
+        // 移动改变文件归属结构，需要源和目标都是 MANAGE 权限
+        // WRITE 只允许编辑内容，不允许移动
+        permissionService.requireManage(id);
+        permissionService.requireManage(newFolderId);
 
         Map<Long, DocFileFolder> map = super.getByIdList(Arrays.asList(id, newFolderId));
         DocFileFolder parent = map.get(newFolderId);
-        if (Objects.isNull(parent)) {
-            throw new BusinessException(ErrorCodeEnum.ERROR.getCode(), String.format("id为%s的目标文件夹不存在", newFolderId));
-        }
         if (FileFolderFormatEnum.FILE.getFormat().equals(parent.getFormat())) {
             throw new BusinessException(ErrorCodeEnum.ERROR.getCode(), "只允许迁移到文件夹下");
         }
@@ -373,7 +364,7 @@ public class DocFileFolderAOImpl extends AbstractDocFileFolderAO implements DocF
         DocFileFolder update = new DocFileFolder();
         update.setId(id);
         update.setParentId(newFolderId);
-        // v0.7 §5.4.b: ACL 行随节点迁移，保留原样
+        // ACL 行随节点迁移，保留原样
         transactionTemplate.execute(status -> {
             docFileFolderService.updateById(update);
             docFileFolderService.updateFolderCount(newFolderId, 1);
@@ -427,11 +418,12 @@ public class DocFileFolderAOImpl extends AbstractDocFileFolderAO implements DocF
     }
 
     /**
-     * v0.7 §5.4.a 重构（v1 only copies single node, NOT subtree）：
-     * - 源 READ + 目标父 MANAGE
+     * v0.13 #12: 完整递归复制子树。
+     * - 源 READ + 目标父 WRITE
      * - 源在当前用户回收站 → 拒绝
-     * - 副本 owner = 复制者；ACL 起始为空
-     * - 不递归复制子树
+     * - 副本 owner = 复制者；ACL 不复制（新副本是复制者的私有物）
+     * - BFS 遍历子树，先建父再建子，文件走存储层物理复制
+     * - 子树节点数 ≤ 500、深度 ≤ 16（防恶意构造）
      */
     @Override
     public void copyFolder(FileFolderCopyVO copyVO) {
@@ -439,11 +431,11 @@ public class DocFileFolderAOImpl extends AbstractDocFileFolderAO implements DocF
         permissionService.requireRead(copyVO.getId());
         permissionService.requireWrite(copyVO.getFolderId());
 
-        DocFileFolder docFileFolder = docFileFolderService.getById(copyVO.getId());
-        if (Objects.isNull(docFileFolder)) {
+        DocFileFolder sourceRoot = docFileFolderService.getById(copyVO.getId());
+        if (Objects.isNull(sourceRoot)) {
             throw new BusinessException(ErrorCodeEnum.RESOURCE_NOT_VISIBLE.getCode(), "源文件夹不存在或无权访问");
         }
-        // 源在当前用户回收站 → 拒绝（v0.8 新增）
+        // 源在当前用户回收站 → 拒绝
         Long userId = LoginContext.getUserId();
         boolean sourceInRecycle = docRecycleService.lambdaQuery()
             .eq(DocRecycle::getFolderId, copyVO.getId())
@@ -453,18 +445,15 @@ public class DocFileFolderAOImpl extends AbstractDocFileFolderAO implements DocF
             throw new BusinessException(ErrorCodeEnum.PERMISSION_DENIED.getCode(), "源文件夹在回收站中，无法复制");
         }
 
-        // v0.7 修正：目标父文件夹存在性显式校验（requireManage 隐式已查但给更清晰的错误信息）
         DocFileFolder targetParent = docFileFolderService.getById(copyVO.getFolderId());
         if (Objects.isNull(targetParent)) {
             throw new BusinessException(ErrorCodeEnum.RESOURCE_NOT_VISIBLE.getCode(), "目标父文件夹不存在或无权访问");
         }
 
-        // v0.7 修正：自循环检测——目标不能是源本身或源的子孙节点
-        // （否则复制会把源挂到自己的子树下面，造成无限递归和 parent 链死循环）
+        // 循环引用检测：目标不能是源本身或源的子孙
         if (copyVO.getId().equals(copyVO.getFolderId())) {
             throw new BusinessException(ErrorCodeEnum.ERROR.getCode(), "目标父文件夹不能是源文件夹本身");
         }
-        // 沿目标父的 parent 链向上走，看是否能找到源 id
         Long cursor = targetParent.getParentId();
         int guard = 0;
         while (cursor != null && cursor != 0L && guard++ < 64) {
@@ -472,36 +461,193 @@ public class DocFileFolderAOImpl extends AbstractDocFileFolderAO implements DocF
                 throw new BusinessException(ErrorCodeEnum.ERROR.getCode(),
                     "目标父文件夹是源文件夹的子孙节点，会造成循环引用");
             }
-            DocFileFolder parent = docFileFolderService.getById(cursor);
-            if (parent == null) break;  // 父链断裂（脏数据），放过
-            cursor = parent.getParentId();
+            DocFileFolder p = docFileFolderService.getById(cursor);
+            if (p == null) break;
+            cursor = p.getParentId();
         }
 
-        // v1: 仅复制当前节点本身（新 id），不递归子树
-        // 用 1-元素数组持有返回值（lambda 内不能赋给外层局部变量）
-        final Long[] newFolderIdHolder = new Long[1];
-        transactionTemplate.execute(status -> {
+        // 收集整棵子树（BFS，只含 status=NORMAL 的节点）
+        List<DocFileFolder> subtree = new ArrayList<>();
+        subtree.add(sourceRoot);
+        super.getChild(Collections.singletonList(sourceRoot.getId()), subtree);
+
+        // 子树大小限制
+        if (subtree.size() > 500) {
+            throw new BusinessException(ErrorCodeEnum.ERROR.getCode(),
+                "文件夹内容过多（超过 500 项），无法复制");
+        }
+
+        // 深度限制
+        Map<Long, Integer> idDepthMap = new HashMap<>();
+        idDepthMap.put(sourceRoot.getId(), 0);
+        for (DocFileFolder node : subtree) {
+            if (node.getId().equals(sourceRoot.getId())) continue;
+            Integer parentDepth = idDepthMap.get(node.getParentId());
+            if (parentDepth != null) {
+                int depth = parentDepth + 1;
+                if (depth > 16) {
+                    throw new BusinessException(ErrorCodeEnum.ERROR.getCode(),
+                        "文件夹层级过深（超过 16 层），无法复制");
+                }
+                idDepthMap.put(node.getId(), depth);
+            }
+        }
+
+        // 名字冲突检测：目标父下同名的最大副本号
+        String baseName = sourceRoot.getName();
+        int maxSuffix = getMaxCopySuffix(copyVO.getFolderId(), baseName);
+        String newName = maxSuffix == 0
+            ? baseName + " (副本)"
+            : baseName + " (副本" + (maxSuffix + 1) + ")";
+
+        // oldId → newId 映射（用于重建 parent 链）
+        Map<Long, Long> oldToNewId = new HashMap<>();
+        LocalDateTime now = LocalDateTime.now();
+
+        // 分离：文件夹 vs 文件
+        List<DocFileFolder> newFolders = new ArrayList<>();
+        List<DocFileFolder> newFiles = new ArrayList<>();
+
+        for (DocFileFolder src : subtree) {
             DocFileFolder copy = new DocFileFolder();
-            copy.setParentId(copyVO.getFolderId());
-            copy.setName(docFileFolder.getName() + " (副本)");
-            copy.setFileCount(0);
-            copy.setFolderCount(0);
-            copy.setFormat(docFileFolder.getFormat());
-            copy.setFileType("");
-            copy.setCollected(false);
+            copy.setOldId(src.getId());
+            copy.setOldVersion(src.getVersion());
+            copy.setId(null);  // 自增
+            copy.setName(src.getId().equals(sourceRoot.getId()) ? newName : src.getName());
+            copy.setFormat(src.getFormat());
+            copy.setFileType(src.getFileType());
+            copy.setImg(src.getImg());
             copy.setVersion(0);
             copy.setCreatorId(userId);
-            copy.setOwnerId(userId);  // v0.7：复制者 = 新 Owner
-            copy.setCreateAt(LocalDateTime.now());
-            copy.setUpdateAt(LocalDateTime.now());
-            copy.setStatus(DelStatusEnum.NORMAL.getStatus());
-            docFileFolderService.save(copy);
-            newFolderIdHolder[0] = copy.getId();
+            copy.setOwnerId(userId);
+            copy.setCreateAt(now);
+            copy.setUpdateAt(now);
+            // 根节点挂到目标父下，子节点在新树内重挂
+            copy.setParentId(src.getId().equals(sourceRoot.getId())
+                ? copyVO.getFolderId()
+                : src.getParentId());
+            // 文件：先 DISPLAY，存储复制成功后改 NORMAL
+            copy.setStatus(FileFolderFormatEnum.FILE.getFormat().equals(src.getFormat())
+                ? DelStatusEnum.DISPLAY.getStatus()
+                : DelStatusEnum.NORMAL.getStatus());
+            // fileCount / folderCount 由后续 rebuildChildrenCounts 回填
+            copy.setFileCount(0);
+            copy.setFolderCount(0);
+
+            if (FileFolderFormatEnum.FILE.getFormat().equals(src.getFormat())) {
+                newFiles.add(copy);
+            } else {
+                newFolders.add(copy);
+            }
+        }
+
+        // 单事务：保存所有新节点（文件夹先于文件，保证 parent 存在）
+        transactionTemplate.execute(status -> {
+            // 1. 保存文件夹（按 BFS 顺序，subtree 已是 BFS）
+            for (DocFileFolder folder : newFolders) {
+                docFileFolderService.save(folder);
+                oldToNewId.put(folder.getOldId(), folder.getId());
+            }
+            // 重建文件夹的 parentId 映射 + fileCount/folderCount
+            for (DocFileFolder folder : newFolders) {
+                Long newParentId = folder.getParentId().equals(copyVO.getFolderId())
+                    ? copyVO.getFolderId()
+                    : oldToNewId.get(folder.getParentId());
+                if (newParentId != null && !newParentId.equals(folder.getParentId())) {
+                    docFileFolderService.lambdaUpdate()
+                        .set(DocFileFolder::getParentId, newParentId)
+                        .eq(DocFileFolder::getId, folder.getId())
+                        .update();
+                }
+            }
+            // 2. 保存文件
+            for (DocFileFolder file : newFiles) {
+                Long newParentId = oldToNewId.get(file.getParentId());
+                if (newParentId != null) {
+                    file.setParentId(newParentId);
+                }
+                docFileFolderService.save(file);
+                oldToNewId.put(file.getOldId(), file.getId());
+            }
+            // 3. 回填文件夹的 fileCount / folderCount
+            rebuildChildrenCounts(newFolders, newFiles);
+            // 4. 更新目标父的 folderCount
             docFileFolderService.updateFolderCount(copyVO.getFolderId(), 1);
             return null;
         });
-        Long newFolderId = newFolderIdHolder[0];
-        // 注意：v1 不复制子树，不复制内容，不复制 ACL（v0.7 §5.4.a）
+
+        // 5. 文件存储复制（事务外，失败只影响存储不影响 DB 结构）
+        if (!newFiles.isEmpty()) {
+            boolean success = docFileContentStorageService.copy(newFiles, () -> {
+                return transactionTemplate.execute(status -> {
+                    List<Long> newFileIds = newFiles.stream()
+                        .map(DocFileFolder::getId).collect(Collectors.toList());
+                    docFileFolderService.lambdaUpdate()
+                        .set(DocFileFolder::getStatus, DelStatusEnum.NORMAL.getStatus())
+                        .in(DocFileFolder::getId, newFileIds)
+                        .update();
+                    docFileFolderService.updateFileCount(copyVO.getFolderId(), newFiles.size());
+                    return true;
+                });
+            });
+            if (!success) {
+                throw new BusinessException(ErrorCodeEnum.ERROR.getCode(), "文档内容复制失败！");
+            }
+        }
+    }
+
+    /**
+     * 查目标父下同名（含"副本"后缀）的最大编号。
+     * 例如目标下已有"报告 (副本)"和"报告 (副本3)"，返回 3。
+     */
+    private int getMaxCopySuffix(Long parentId, String baseName) {
+        List<DocFileFolder> siblings = docFileFolderService.list(Wrappers.<DocFileFolder>lambdaQuery()
+            .eq(DocFileFolder::getParentId, parentId)
+            .likeRight(DocFileFolder::getName, baseName));
+        int max = 0;
+        for (DocFileFolder s : siblings) {
+            String n = s.getName();
+            if (n.equals(baseName) || n.equals(baseName + " (副本)")) {
+                max = Math.max(max, 1);
+            } else if (n.startsWith(baseName + " (副本") && n.endsWith(")")) {
+                try {
+                    String num = n.substring((baseName + " (副本").length(), n.length() - 1);
+                    max = Math.max(max, Integer.parseInt(num.trim()));
+                } catch (NumberFormatException ignored) {}
+            }
+        }
+        return max;
+    }
+
+    /**
+     * 回填每个新文件夹的 fileCount / folderCount。
+     * 调用时所有新节点的 parentId 已修正完毕，直接按 parentId 分组统计。
+     */
+    private void rebuildChildrenCounts(List<DocFileFolder> newFolders,
+                                       List<DocFileFolder> newFiles) {
+        Set<Long> folderIds = newFolders.stream()
+            .map(DocFileFolder::getId).collect(Collectors.toSet());
+        // folderCount: 每个 folder 下有多少子 folder
+        Map<Long, Long> subFolderCounts = newFolders.stream()
+            .filter(f -> folderIds.contains(f.getParentId()))
+            .collect(Collectors.groupingBy(DocFileFolder::getParentId, Collectors.counting()));
+        // fileCount: 每个 folder 下有多少文件
+        Map<Long, Long> subFileCounts = newFiles.stream()
+            .filter(f -> folderIds.contains(f.getParentId()))
+            .collect(Collectors.groupingBy(DocFileFolder::getParentId, Collectors.counting()));
+        // 批量更新
+        for (DocFileFolder folder : newFolders) {
+            Long fid = folder.getId();
+            long fc = subFolderCounts.getOrDefault(fid, 0L);
+            long fic = subFileCounts.getOrDefault(fid, 0L);
+            if (fc > 0 || fic > 0) {
+                docFileFolderService.lambdaUpdate()
+                    .set(DocFileFolder::getFolderCount, (int) fc)
+                    .set(DocFileFolder::getFileCount, (int) fic)
+                    .eq(DocFileFolder::getId, fid)
+                    .update();
+            }
+        }
     }
 
     /**
@@ -527,12 +673,33 @@ public class DocFileFolderAOImpl extends AbstractDocFileFolderAO implements DocF
             return Collections.emptyList();
         }
         Map<Long, List<DocFileFolder>> parentIdMapFolderMap = docFileFolderList.stream().collect(Collectors.groupingBy(DocFileFolder::getParentId));
-        List<DocFileFolder> topFolders = parentIdMapFolderMap.get(0L);
-        if(CollectionUtils.isEmpty(topFolders)) {
-            return Collections.emptyList();
-        }
-        return topFolders.stream().map(folder -> this.buildDocSynthFileFolderResVO(folder, parentIdMapFolderMap))
+        Set<Long> allFolderIds = docFileFolderList.stream().map(DocFileFolder::getId).collect(Collectors.toSet());
+        // 分为两类顶层节点：自己的根文件夹（parent_id=0 且 owner_id=userId）和共享文件夹
+        List<DocFileFolder> ownedRoots = docFileFolderList.stream()
+            .filter(f -> f.getParentId() == 0L && userId.equals(f.getOwnerId()))
             .collect(Collectors.toList());
+        List<DocFileFolder> sharedRoots = docFileFolderList.stream()
+            .filter(f -> !userId.equals(f.getOwnerId()))
+            .filter(f -> f.getParentId() == 0L || !allFolderIds.contains(f.getParentId()))
+            .collect(Collectors.toList());
+
+        List<DocSynthFileFolderResVO> result = new ArrayList<>();
+        // 自己的根文件夹直接作为顶层
+        for (DocFileFolder folder : ownedRoots) {
+            result.add(this.buildDocSynthFileFolderResVO(folder, parentIdMapFolderMap));
+        }
+        // 共享文件夹挂到"被分享的文件夹"虚拟节点下
+        if (!sharedRoots.isEmpty()) {
+            DocSynthFileFolderResVO sharedNode = new DocSynthFileFolderResVO();
+            sharedNode.setId(-1L);
+            sharedNode.setName("被分享的文件夹");
+            sharedNode.setFolder(true);
+            sharedNode.setChildren(sharedRoots.stream()
+                .map(folder -> this.buildDocSynthFileFolderResVO(folder, parentIdMapFolderMap))
+                .collect(Collectors.toList()));
+            result.add(sharedNode);
+        }
+        return result;
     }
 
     /**
@@ -619,6 +786,8 @@ public class DocFileFolderAOImpl extends AbstractDocFileFolderAO implements DocF
      * v0.11 B1 MINOR: 删 creatorId 硬编码过滤（顶层目录下"我可见"的所有文件）
      */
     private List<DocFileResVO> filterFileList(List<DocFileFolder> fileFolders, Boolean isTop) {
+        Long userId = LoginContext.getUserId();
+        Set<Long> collectedIds = getCollectedFolderIds(userId, fileFolders);
         return fileFolders.stream()
                 .filter(folder -> FileFolderFormatEnum.FILE.getFormat().equals(folder.getFormat()))
                 // v0.11: 删 .filter(!isTop || folder.getCreatorId()...) 硬编码
@@ -628,7 +797,7 @@ public class DocFileFolderAOImpl extends AbstractDocFileFolderAO implements DocF
                     resVO.setName(fileFolder.getName());
                     resVO.setType(fileFolder.getFileType());
                     resVO.setImg(fileFolder.getImg());
-                    resVO.setCollected(fileFolder.getCollected());
+                    resVO.setCollected(collectedIds.contains(fileFolder.getId()));
                     resVO.setCreateAt(fileFolder.getCreateAt());
                     resVO.setUpdateAt(fileFolder.getUpdateAt());
                     return resVO;
@@ -669,19 +838,29 @@ public class DocFileFolderAOImpl extends AbstractDocFileFolderAO implements DocF
     }
 
     /**
-     * 构建 ACL 子查询 SQL：返回当前用户通过 ACL 可访问的 folder_id 集合。
+     * 构建 ACL 子查询 SQL：返回当前用户可访问的 folder_id 集合（含 ACL 直接命中 + 其所有后代）。
      * 用在 inSql() 里，避免 MyBatis-Plus LambdaQueryWrapper.in(column, Wrapper) 不支持子查询的问题。
      *
-     * <p>package-private for test（{@code DocFileFolderAOImplTest} 直接断言 SQL 三分支齐全 + revoked_at 过滤）。
+     * <p>v0.13 #4 + MySQL 8 升级：改用 WITH RECURSIVE CTE，递归展开"直接 ACL 命中 folder 的所有后代"。
+     * 旧版只返回直接命中集合，导致"父被共享但子未共享"的 folder 在 tree 里不可见。
+     * <p>MySQL 8.0.1+ 支持 WITH RECURSIVE。CTE 名用 acl_cte（accessible 是 MySQL 保留字，不能用作标识符）。
+     *
+     * <p>package-private for test（{@code DocFileFolderAOImplTest} 直接断言 SQL 含锚点 + 递归两段 + revoked_at 过滤）。
      */
     String buildAclSubSql(Long userId) {
         List<Long> groupIds = this.getMyGroupIds();
         String inClause = groupIds.isEmpty() ? "(-1)"
             : groupIds.stream().map(String::valueOf).collect(Collectors.joining(","));
-        return "SELECT folder_id FROM doc_file_folder_acl WHERE revoked_at IS NULL "
-            + "AND ((principal_type = 'USER' AND principal_id = " + userId + ") "
-            + "OR principal_type = 'ORG' "
-            + "OR principal_id IN (" + inClause + "))";
+        return "WITH RECURSIVE acl_cte AS ("
+            + "  SELECT folder_id FROM doc_file_folder_acl WHERE revoked_at IS NULL "
+            + "    AND ((principal_type = 'USER' AND principal_id = " + userId + ") "
+            + "         OR principal_type = 'ORG' "
+            + "         OR principal_id IN (" + inClause + ")) "
+            + "  UNION ALL "
+            + "  SELECT f.id FROM doc_file_folder f "
+            + "    JOIN acl_cte a ON f.parent_id = a.folder_id "
+            + "    WHERE f.status != -1 "
+            + ") SELECT folder_id FROM acl_cte";
     }
 
     /** 构建回收站子查询 SQL：返回当前用户已软删除的 folder_id 集合 */

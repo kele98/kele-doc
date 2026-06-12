@@ -142,7 +142,8 @@ public class SysUserInfoController {
         if (target == null) {
             return ResponseResult.fail("用户不存在");
         }
-        if ("admin".equals(target.getAccount())) {
+        // v0.13 #9: 用 id==1L 保护初始 admin，不依赖账号名（admin 改名失效 / 别人改名 admin 被永久保护）
+        if (target.getId() != null && target.getId() == 1L) {
             return ResponseResult.fail("不允许操作超级管理员");
         }
         SysUserInfo update = new SysUserInfo();
@@ -168,7 +169,8 @@ public class SysUserInfoController {
         if (target == null) {
             return ResponseResult.fail("用户不存在");
         }
-        if ("admin".equals(target.getAccount())) {
+        // v0.13 #9: 用 id==1L 保护初始 admin，不依赖账号名（admin 改名失效 / 别人改名 admin 被永久保护）
+        if (target.getId() != null && target.getId() == 1L) {
             return ResponseResult.fail("不允许操作超级管理员");
         }
         SysUserInfo update = new SysUserInfo();

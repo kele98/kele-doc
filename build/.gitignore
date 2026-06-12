@@ -1,0 +1,8 @@
+# 构建产物
+dist/
+
+# Docker 运行时数据
+compose/mysql/
+compose/redis/
+compose/minio/
+compose/index.html

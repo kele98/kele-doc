@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "mockDev": "vite --mode mock",
-    "build": "run-p type-check \"build-only {@}\" --",
+    "build": "vite build",
     "preview": "vite preview",
     "build-only": "vite build",
     "type-check": "vue-tsc --build --force",
@@ -23,6 +23,7 @@
     "file-saver": "^2.0.5",
     "hfmath": "^0.0.2",
     "html-to-image": "^1.11.11",
+    "html2canvas": "^1.4.1",
     "lodash": "^4.17.21",
     "mitt": "^3.0.1",
     "nanoid": "^5.0.4",

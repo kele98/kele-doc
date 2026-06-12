@@ -52,12 +52,16 @@ class PermissionServiceTest {
 
     @Test
     void resolve_null_user_returns_none() {
-        assertEquals(PermissionResult.none(), permissionService.resolve(null, 1L));
+        PermissionResult r = permissionService.resolve(null, 1L);
+        assertEquals(PermissionLevel.NONE, r.getLevel());
+        assertEquals(PermissionResult.Source.NONE, r.getSource());
     }
 
     @Test
     void resolve_null_folder_returns_none() {
-        assertEquals(PermissionResult.none(), permissionService.resolve(1L, null));
+        PermissionResult r = permissionService.resolve(1L, null);
+        assertEquals(PermissionLevel.NONE, r.getLevel());
+        assertEquals(PermissionResult.Source.NONE, r.getSource());
     }
 
     @Test
@@ -80,10 +84,7 @@ class PermissionServiceTest {
         DocFileFolder folder = folder(folderId, null, userId);
 
         when(docFileFolderMapper.selectById(folderId)).thenReturn(folder);
-        // 即便本层有 ACL，owner 也直接返回
-        DocFileFolderAcl acl = acl(folderId, "USER", 999L, "READ");
-        when(docFileFolderAclMapper.selectList(any())).thenReturn(Collections.singletonList(acl));
-        when(groupMemberMapper.selectList(any())).thenReturn(Collections.emptyList());
+        // owner check 在 ACL 查询之前直接返回，无需 stub ACL / groupMember
 
         PermissionResult r = permissionService.resolve(userId, folderId);
         assertEquals(PermissionLevel.MANAGE, r.getLevel());
@@ -144,7 +145,8 @@ class PermissionServiceTest {
 
         PermissionResult r = permissionService.resolve(userId, folderId);
         assertEquals(PermissionLevel.WRITE, r.getLevel());
-        assertEquals(PermissionResult.Source.GROUP, r.getSource());
+        // 同节点 GROUP ACL → isDirect=true → source=DIRECT（location-based 语义）
+        assertEquals(PermissionResult.Source.DIRECT, r.getSource());
     }
 
     @Test
@@ -173,7 +175,10 @@ class PermissionServiceTest {
 
         when(docFileFolderMapper.selectById(b)).thenReturn(fb);
         when(docFileFolderMapper.selectById(a)).thenReturn(fa);
-        when(docFileFolderAclMapper.selectList(any())).thenReturn(Collections.singletonList(acl));
+        // 链式 return：cursor=B 时无 ACL，cursor=A 时有 ACL
+        when(docFileFolderAclMapper.selectList(any()))
+            .thenReturn(Collections.emptyList())
+            .thenReturn(Collections.singletonList(acl));
         when(groupMemberMapper.selectList(any())).thenReturn(Collections.emptyList());
 
         PermissionResult r = permissionService.resolve(userId, b);
@@ -196,7 +201,8 @@ class PermissionServiceTest {
 
         PermissionResult r = permissionService.resolve(userId, folderId);
         assertEquals(PermissionLevel.READ, r.getLevel());
-        assertEquals(PermissionResult.Source.ORG, r.getSource());
+        // 同节点 ORG ACL → isDirect=true → source=DIRECT（location-based 语义）
+        assertEquals(PermissionResult.Source.DIRECT, r.getSource());
     }
 
     // ---------- best-of 选择：DIRECT > INHERITED ----------

@@ -11,10 +11,8 @@
     </div>
     <div class="formBox">
       <div class="formWrap">
-        <div class="title">
-          {{ isRegister ? '注册新账号' : `欢迎使用${config.name}` }}
-        </div>
-        <!-- 登录/注册 -->
+        <div class="title">欢迎使用{{ config.name }}</div>
+        <!-- 登录 -->
         <el-form ref="loginFormRef" :model="loginForm" :rules="loginRules">
           <el-form-item label="" prop="account">
             <el-input
@@ -31,29 +29,13 @@
               show-password
             />
           </el-form-item>
-          <el-form-item label="" prop="password2" v-if="isRegister">
-            <el-input
-              v-model="loginForm.password2"
-              placeholder="请再次输入密码"
-              style="height: 50px"
-              show-password
-            />
-          </el-form-item>
         </el-form>
         <el-button
           type="primary"
           style="width: 100%; height: 50px"
           @click="confirm"
-          >{{ isRegister ? '注册' : '登录' }}</el-button
+          >登录</el-button
         >
-        <div class="btnBox">
-          <div class="registerBtn" @click="changeToLogin" v-if="isRegister">
-            已有账号？点此登录
-          </div>
-          <div class="registerBtn" @click="changeToRegister" v-else>
-            没有账号？点此注册
-          </div>
-        </div>
       </div>
     </div>
   </div>
@@ -67,8 +49,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
   validateAccount,
-  validatePassword,
-  getValidatePassword2Fn
+  validatePassword
 } from '@/utils'
 import { useStore } from '../../store'
 
@@ -93,11 +74,7 @@ init()
 const loginFormRef = ref(null)
 const loginForm = reactive({
   account: '',
-  password: '',
-  password2: ''
-})
-const validatePassword2 = getValidatePassword2Fn(() => {
-  return loginForm.password.trim()
+  password: ''
 })
 const loginRules = reactive({
   account: [
@@ -107,13 +84,8 @@ const loginRules = reactive({
   password: [
     { required: true, message: '请输入密码', trigger: 'blur' },
     { validator: validatePassword, trigger: 'blur' }
-  ],
-  password2: [
-    { required: true, message: '请再次输入密码', trigger: 'blur' },
-    { validator: validatePassword2, trigger: 'blur' }
   ]
 })
-const isRegister = ref(false)
 
 const login = async () => {
   await api.login({
@@ -126,43 +98,16 @@ const login = async () => {
   })
 }
 
-const register = async () => {
-  await api.register({
-    account: loginForm.account.trim(),
-    password: loginForm.password.trim()
-  })
-  ElMessage.success('注册成功')
-  changeToLogin()
-}
-
-const resetForm = () => {
-  loginFormRef.value.resetFields()
-}
-
 const confirm = () => {
   loginFormRef.value.validate(async valid => {
     if (valid) {
       try {
-        if (isRegister.value) {
-          await register()
-        } else {
-          await login()
-        }
+        await login()
       } catch (error) {
         console.log(error)
       }
     }
   })
-}
-
-const changeToRegister = () => {
-  isRegister.value = true
-  resetForm()
-}
-
-const changeToLogin = () => {
-  isRegister.value = false
-  resetForm()
 }
 </script>
 
@@ -228,16 +173,6 @@ const changeToLogin = () => {
         font-size: 30px;
         color: #212930;
         margin-bottom: 40px;
-      }
-
-      .btnBox {
-        margin-top: 12px;
-
-        .registerBtn {
-          font-size: 12px;
-          cursor: pointer;
-          user-select: none;
-        }
       }
     }
   }

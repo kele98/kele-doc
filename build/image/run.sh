@@ -6,32 +6,27 @@ MEMORY=${MEMORY:-"1024m"}
 
 Start() {
     mem=$1
-    echo ${mem}
     if [ -z "$mem" ]; then
         mem=$MEMORY
     fi
-    echo ${mem}
 
     proc=$(ps -ef | grep "$SERVICE_DIR" | grep -v grep | wc -l)
     if [[ $proc != 0 ]]; then
         exit 5
     fi
-    nginx -g "daemon on;" -c /usr/nginx/config/nginx.conf  # 新增这一行
-    java -server -Xms${mem} -Xmx${mem} -jar "$SERVICE_DIR".jar $ARGS >> /usr/logs/${SERVICE}/${SERVICE}.log 2>&1 &
+    nginx -g "daemon on;" -c /usr/nginx/config/nginx.conf
+    java -server -Xms${mem} -Xmx${mem} -jar "$SERVICE_DIR".jar --spring.profiles.active=prod >> /usr/logs/${SERVICE}/${SERVICE}.log 2>&1 &
 }
 
 initStart() {
-    # 启动 nginx（使用指定配置）
     nginx -g "daemon on;" -c /usr/nginx/config/nginx.conf
-
-    # 启动 Java 应用（前台运行，输出日志）
-    java -server -Xms${MEMORY} -Xmx${MEMORY} -jar "$SERVICE_DIR".jar $ARGS 2>&1 | tee /usr/logs/${SERVICE}/${SERVICE}.log
+    java -server -Xms${MEMORY} -Xmx${MEMORY} -jar "$SERVICE_DIR".jar --spring.profiles.active=prod 2>&1 | tee /usr/logs/${SERVICE}/${SERVICE}.log
 }
 
 Stop() {
     echo "Stopping nginx..."
     nginx -s quit
-    
+
     in_stop_count=0
     while true; do
         proc=$(ps -ef | grep "$SERVICE_DIR" | grep -v grep | wc -l)

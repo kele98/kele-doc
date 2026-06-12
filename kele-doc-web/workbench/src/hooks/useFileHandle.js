@@ -9,16 +9,29 @@ const useFileHandle = () => {
   const isDev = process.env.NODE_ENV !== 'production'
   const ip = location.hostname
 
+  // 获取根文件夹 ID（用于根目录下创建文件）
+  const getRootFolderId = async () => {
+    const { data } = await api.getFolderTree({ folderId: '' })
+    if (data && data.length > 0) {
+      return data[0].id
+    }
+    return null
+  }
+
   // 创建并打开新文件
   const createAndOpenNewFile = async type => {
     try {
-      if (!store.currentFolder) {
+      let folderId = store.currentFolder?.id
+      if (!folderId) {
+        folderId = await getRootFolderId()
+      }
+      if (!folderId) {
         ElMessage.warning('请先选择文件夹')
         return
       }
       const { data } = await api.createFile({
         name: '未命名文件',
-        folderId: store.currentFolder.id,
+        folderId,
         type
       })
       emitter.emit('refresh_list')
@@ -52,7 +65,9 @@ const useFileHandle = () => {
         url = (isDev ? `http://${ip}:9096/ppt/` : '/ppt/') + uid
         break
       case 'process':
-        url = (isDev ? `http://${ip}:9097/index.html` : '/flowchart/') + uid
+        url = isDev
+          ? `http://${ip}:9097/?id=${uid}&dev=1`
+          : '/flowchart/' + uid
         break
       case 'bpmn':
         url = (isDev ? `http://${ip}:9098/bpmn/` : '/bpmn/') + uid
@@ -60,9 +75,6 @@ const useFileHandle = () => {
       case 'note':
         url = (isDev ? `http://${ip}:9099/note/` : '/note/') + uid
         break
-      // case 'resume':
-      //   url = (isDev ? `http://${ip}:8088/` : '../resume/') + '?uid=' + uid
-      //   break
       default:
         break
     }

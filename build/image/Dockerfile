@@ -34,10 +34,8 @@ RUN mkdir -p /var/log/nginx/ \
     && mkdir -p /usr/logs/${SERVICE}/ \
     && mkdir -p /usr/attachment/${SERVICE}/
 
-# 复制并解压前端文件（构建上下文 = build/，dist/ 在其下）
-COPY dist/kele-doc.zip /usr/web/html/
-RUN unzip -q -d /usr/web/html/ /usr/web/html/kele-doc.zip \
-    && rm -rf /usr/web/html/kele-doc.zip
+# 复制前端文件（构建上下文 = build/，前端产物在 dist/frontend/）
+COPY dist/frontend/ /usr/web/html/kele-doc/
 
 # 拷贝 nginx 配置
 COPY image/nginx.conf /usr/nginx/config/

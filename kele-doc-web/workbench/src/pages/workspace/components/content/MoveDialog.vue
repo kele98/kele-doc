@@ -18,13 +18,7 @@
       <span class="dialog-footer">
         <el-button @click="onClose">取消</el-button>
         <el-button type="primary" @click="onConfirmCopy">复制</el-button>
-        <el-button
-          v-if="isCurrentFolderOwner"
-          type="primary"
-          @click="onConfirmMove"
-          :disabled="disabledMove"
-          >移动</el-button
-        >
+        <el-button type="primary" @click="onConfirmMove" :disabled="disabledMove">移动</el-button>
       </span>
     </template>
   </el-dialog>
@@ -43,12 +37,6 @@ const editData = ref(null)
 const loadTree = ref(false)
 const store = useStore()
 
-// 当前文件夹是否是自己的（非 owner 的共享文件夹下不允许移动）
-const isCurrentFolderOwner = computed(() => {
-  const folder = store.currentFolder
-  if (!folder || !store.userInfo) return true
-  return folder.isOwner !== false
-})
 const title = computed(() => {
   if (editData.value) {
     let name = editData.value.name || ''
@@ -142,7 +130,7 @@ const copyFile = async () => {
     onClose()
     ElMessage.success('复制成功')
   } catch (error) {
-    console.log(error)
+    ElMessage.error(error?.response?.data?.message || '复制文件失败')
   }
 }
 
@@ -157,7 +145,7 @@ const moveFile = async () => {
     onClose()
     ElMessage.success('移动成功')
   } catch (error) {
-    console.log(error)
+    ElMessage.error(error?.response?.data?.message || '移动文件失败')
   }
 }
 
@@ -173,7 +161,7 @@ const copyFolder = async () => {
     emitter.emit('copy_folder_success')
     ElMessage.success('复制成功')
   } catch (error) {
-    console.log(error)
+    ElMessage.error(error?.response?.data?.message || '复制文件夹失败')
   }
 }
 
@@ -189,7 +177,7 @@ const moveFolder = async () => {
     emitter.emit('move_folder_success')
     ElMessage.success('移动成功')
   } catch (error) {
-    console.log(error)
+    ElMessage.error(error?.response?.data?.message || '移动文件夹失败')
   }
 }
 </script>

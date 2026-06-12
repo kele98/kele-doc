@@ -9,8 +9,10 @@ import com.kele.core.buz.doc.permission.PermissionService;
 import com.kele.core.buz.doc.service.IDocFileContentStorageService;
 import com.kele.core.buz.doc.service.IDocRelationLevelService;
 import com.kele.core.other.context.LoginContext;
+import com.kele.core.buz.doc.dao.entity.DocCollectFolder;
 import com.kele.core.buz.doc.dao.entity.DocFileFolder;
 import com.kele.core.buz.doc.dao.entity.DocRecycle;
+import com.kele.core.buz.doc.service.IDocCollectFolderService;
 import com.kele.core.buz.doc.service.IDocFileFolderService;
 import com.kele.core.buz.doc.service.IDocRecycleService;
 import com.kele.core.other.enums.DelStatusEnum;
@@ -38,6 +40,9 @@ public abstract class AbstractDocFileFolderAO {
 
     @Autowired
     protected IDocRecycleService docRecycleService;
+
+    @Autowired
+    protected IDocCollectFolderService docCollectFolderService;
 
     @Autowired
     protected IDocRelationLevelService docRelationLevelService;
@@ -141,6 +146,8 @@ public abstract class AbstractDocFileFolderAO {
     }
 
     protected List<DocFileResVO> filterFileList(List<DocFileFolder> fileFolders) {
+        Long userId = LoginContext.getUserId();
+        Set<Long> collectedIds = getCollectedFolderIds(userId, fileFolders);
         return fileFolders.stream()
                 .filter(folder -> FileFolderFormatEnum.FILE.getFormat().equals(folder.getFormat()))
                 .map(fileFolder -> {
@@ -149,12 +156,32 @@ public abstract class AbstractDocFileFolderAO {
                     resVO.setName(fileFolder.getName());
                     resVO.setType(fileFolder.getFileType());
                     resVO.setImg(fileFolder.getImg());
-                    resVO.setCollected(fileFolder.getCollected());
+                    resVO.setCollected(collectedIds.contains(fileFolder.getId()));
                     resVO.setCreateAt(fileFolder.getCreateAt());
                     resVO.setUpdateAt(fileFolder.getUpdateAt());
                     return resVO;
                 })
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * 批量查询当前用户已收藏的 folder ID 集合。
+     */
+    protected Set<Long> getCollectedFolderIds(Long userId, List<DocFileFolder> fileFolders) {
+        if (userId == null || CollectionUtils.isEmpty(fileFolders)) {
+            return Collections.emptySet();
+        }
+        List<Long> folderIds = fileFolders.stream()
+                .filter(f -> FileFolderFormatEnum.FILE.getFormat().equals(f.getFormat()))
+                .map(DocFileFolder::getId).collect(Collectors.toList());
+        if (CollectionUtils.isEmpty(folderIds)) {
+            return Collections.emptySet();
+        }
+        return docCollectFolderService.list(
+                Wrappers.<DocCollectFolder>lambdaQuery()
+                        .eq(DocCollectFolder::getUserId, userId)
+                        .in(DocCollectFolder::getFolderId, folderIds))
+                .stream().map(DocCollectFolder::getFolderId).collect(Collectors.toSet());
     }
 
     /**

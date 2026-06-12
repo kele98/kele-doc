@@ -19,6 +19,11 @@ export default defineConfig({
       '^/static': {
         target: 'http://localhost:9222/',
         changeOrigin: true
+      },
+      '^/fs': {
+        target: 'http://localhost:19000',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/fs/, '')
       }
     }
   }

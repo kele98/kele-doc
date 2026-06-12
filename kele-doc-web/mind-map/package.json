@@ -5,7 +5,7 @@
   "scripts": {
     "serve": "vue-cli-service serve",
     "mockServe": "vue-cli-service serve --mode mock",
-    "build": "vue-cli-service build ",
+    "build": "NODE_OPTIONS=--openssl-legacy-provider vue-cli-service build",
     "lint": "vue-cli-service lint",
     "format": "prettier --write src/* src/*/* src/*/*/* src/*/*/*/*",
     "createNodeImageList": "node ./scripts/createNodeImageList.js"

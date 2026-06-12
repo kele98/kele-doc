@@ -6,9 +6,9 @@
 build/
 ├── README.md                       # 本文件
 ├── .dockerignore                   # 构建上下文排除规则
-├── dist/                           # 构建产物（jar/zip 落地点）
+├── dist/                           # 构建产物（jar + 前端落地点）
 │   ├── kele-doc.jar                # mvn package 产物，build.sh 自动拷入
-│   └── kele-doc.zip                # 前端 dist 打包，需手动放入
+│   └── frontend/                   # 前端构建产物，build.sh 自动生成
 │
 ├── image/                          # 镜像层：打包进 docker image 的内容
 │   ├── Dockerfile                  # 应用镜像构建（alpine + nginx + jdk11）
@@ -20,7 +20,7 @@ build/
 │   └── docker-compose.yml          # mysql / redis / minio / app 一键拉起
 │
 └── host/                           # 宿主机层：宿主机执行
-    ├── build.sh                    # mvn package + docker build 一条龙
+    ├── build.sh                    # 前后端构建 + docker build 一条龙
     └── doc.sql                     # MySQL 初始化（手动 import）
 ```
 
@@ -37,9 +37,11 @@ cd build
 ```
 
 `build.sh` 内部：
-1. 在仓库根目录跑 `mvn clean package` → 生成 `kele-core/target/kele-doc.jar`
-2. 拷到 `build/dist/kele-doc.jar`
-3. 在 `build/` 下 `docker build -f image/Dockerfile -t kele-doc:1.0 .`（构建上下文 = `build/`，让 `dist/` 可被 `COPY`）
+1. 在 `kele-doc-web/` 下跑 `npm run build`（串行构建 10 个子项目）
+2. 跑 `node scripts/deploy.js dist --clean`（合并前端产物到统一目录）
+3. 在仓库根目录跑 `mvn clean package` → 生成 `kele-core/target/kele-doc.jar`
+4. 拷贝 jar 和前端产物到 `build/dist/`
+5. 在 `build/` 下 `docker build -f image/Dockerfile -t kele-doc:1.0 .`
 
 ## 启动整栈
 

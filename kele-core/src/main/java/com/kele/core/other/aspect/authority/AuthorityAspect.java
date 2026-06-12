@@ -89,7 +89,13 @@ public class AuthorityAspect implements ApplicationContextAware {
             .map(Object::getClass)
             .toArray(Class<?>[]::new);
         Method method1 = ReflectionUtils.findMethod(bean.getClass(), authority.methodName(), classes);
-        assert method1 != null;
+        // v0.13 #7: assert 在 prod (-ea off) 静默吞掉 null，NPE 被 GlobalExceptionHandler
+        // 当成 "system error" 掩盖真实原因。改成显式判空 + 带定位信息的 BusinessException。
+        if (method1 == null) {
+            throw new BusinessException(ErrorCodeEnum.ERROR.getCode(),
+                "鉴权配置错误: " + authority.beanName() + "#" + authority.methodName()
+                    + " 未找到（参数类型: " + Arrays.toString(classes) + ")");
+        }
         return method1.invoke(bean, finalArgs);
     }
 

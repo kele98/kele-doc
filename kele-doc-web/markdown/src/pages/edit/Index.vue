@@ -26,6 +26,7 @@
             <span class="text">{{ saveTip }}</span>
           </span>
           <el-button @click="save">保存</el-button>
+          <el-button @click="saveCover">生成封面</el-button>
           <el-button @click="copyHtml">复制HTML</el-button>
           <el-tooltip content="预览主题" placement="bottom">
             <el-select
@@ -99,6 +100,7 @@ import '@vavt/v3-extension/lib/asset/Emoji.css'
 import { ExportPDF } from '@vavt/v3-extension'
 import '@vavt/v3-extension/lib/asset/ExportPDF.css'
 import { ElMessage } from 'element-plus'
+import html2canvas from 'html2canvas'
 import screenfull from 'screenfull'
 import katex from 'katex'
 import 'katex/dist/katex.min.css'
@@ -315,6 +317,23 @@ const copyHtml = () => {
   selection.removeAllRanges()
   selection.addRange(range)
   ElMessage.info('请按Ctrl+C进行复制')
+}
+const saveCover = async () => {
+  try {
+    const previewEl = document.querySelector('#md-editor-v3_1-preview')
+    if (!previewEl) {
+      ElMessage.warning('未找到预览区域')
+      return
+    }
+    const canvas = await html2canvas(previewEl, { scale: 1, useCORS: true })
+    const imgData = canvas.toDataURL('image/png')
+    const { data } = await api.uploadImg({ imgData })
+    await store.updateFileData({ img: data })
+    ElMessage.success('封面生成成功')
+  } catch (error) {
+    console.log(error)
+    ElMessage.warning('封面生成失败')
+  }
 }
 
 // 文件内容
