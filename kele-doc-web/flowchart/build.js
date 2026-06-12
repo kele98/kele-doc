@@ -26,13 +26,23 @@ function copyDir(src, dest) {
 function patchIndexHtml() {
   const htmlPath = path.join(DST, 'index.html');
   let html = fs.readFileSync(htmlPath, 'utf-8');
-  // The original index.html uses urlParams['dev']=='1' to switch between
-  // dev mode (individual source files) and production mode (app.min.js etc.)
-  // Since Ant didn't run, app.min.js doesn't exist — force dev mode.
+
+  // Patch 1: Force dev mode script loading block
   html = html.replace(
     "if (urlParams['dev'] == '1') {",
     "if (true) { // forced dev mode: Ant not available, no minified bundles"
   );
+
+  // Patch 2: Set urlParams['dev'] = '1' so mxscript() uses document.write
+  // (synchronous loading). Without this, mxscript sees urlParams['dev'] != '1'
+  // and falls back to createElement (async), breaking script load order.
+  // Insert right before the first mxscript call in the dev block.
+  html = html.replace(
+    "// Changes paths for local development environment",
+    "// Changes paths for local development environment\n" +
+    "      urlParams['dev'] = '1'; // forced by build: ensure mxscript uses document.write"
+  );
+
   fs.writeFileSync(htmlPath, html);
 }
 
