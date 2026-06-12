@@ -14,8 +14,8 @@
             @blur="onFileNameBlur"
           ></el-input>
           <div class="saveInfo">
-            <span class="saveBtn" @click="saveCover">生成封面</span>
             <span class="saveBtn" @click="save">保存</span>
+            <span class="saveBtn" @click="saveCover">生成封面</span>
             <span class="saveTip">
               <span class="icon " :class="[saveTipIcon]"></span>
               <span class="text">{{ saveTip }}</span>

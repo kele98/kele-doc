@@ -15,6 +15,9 @@
         @blur="onFileNameBlur"
       />
     </div>
+    <el-button round @click="save" size="small" style="margin-right: 10px"
+      >保存</el-button
+    >
     <el-tooltip
       effect="dark"
       content="封面图片会在文件列表页显示"
@@ -22,9 +25,6 @@
     >
       <el-button round @click="saveCover" size="small">生成封面</el-button>
     </el-tooltip>
-    <el-button round @click="save" size="small" style="margin-right: 10px"
-      >保存</el-button
-    >
     <span class="saveTip">
       <el-icon :class="[saveTipIconIsLoading ? 'is-loading' : '']" color="#333"
         ><component :is="saveTipIcon"></component

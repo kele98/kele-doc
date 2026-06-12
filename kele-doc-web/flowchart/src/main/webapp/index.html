@@ -270,15 +270,6 @@
           style="margin-right: 10px"
           @click="back"
         ></el-button>
-        <el-tooltip
-          effect="dark"
-          content="封面图片会在文件列表页显示"
-          placement="bottom"
-        >
-          <el-button round @click="saveCover" style="margin-right: 10px"
-            >生成封面</el-button
-          >
-        </el-tooltip>
       </div>
       <div class="center" v-if="showHeader">
         <div class="name">
@@ -301,6 +292,13 @@
           <span class="text">{{ saveTip }}</span>
         </span>
         <el-button round @click="save">保存</el-button>
+        <el-tooltip
+          effect="dark"
+          content="封面图片会在文件列表页显示"
+          placement="bottom"
+        >
+          <el-button round @click="saveCover">生成封面</el-button>
+        </el-tooltip>
       </div>
       <div class="mask" v-if="showMask"></div>
     </div>
