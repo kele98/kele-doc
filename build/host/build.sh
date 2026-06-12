@@ -7,6 +7,7 @@ ROOT_DIR=$(cd $BUILD_DIR/..; pwd)
 
 # 1. 重装前端依赖（确保原生二进制匹配当前平台）
 echo "==> [1/5] 前端依赖安装 ..."
+(cd $ROOT_DIR/kele-doc-web && npm install)
 (cd $ROOT_DIR/kele-doc-web && npm run install:all)
 
 # 2. 构建前端（并行构建 10 个子项目 + deploy 合并）
