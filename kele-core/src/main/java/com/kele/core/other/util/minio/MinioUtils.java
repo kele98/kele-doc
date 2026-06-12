@@ -4,14 +4,17 @@ import com.kele.common.enums.ErrorCodeEnum;
 import com.kele.common.exception.BusinessException;
 import com.kele.core.other.properties.MinioFileUploadProperties;
 import io.minio.BucketExistsArgs;
+import io.minio.MakeBucketArgs;
 import io.minio.MinioClient;
 import java.util.Objects;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.util.StringUtils;
 
 /**
  * @author wuzhenhong
  * @date 2025/3/12 18:08
  */
+@Slf4j
 public class MinioUtils {
 
     public static final MinioClient createMinioClient(MinioFileUploadProperties minio) {
@@ -50,11 +53,16 @@ public class MinioUtils {
             exists = minioClient.bucketExists(BucketExistsArgs.builder().bucket(bucket).build());
         } catch (Exception e) {
             throw new BusinessException(ErrorCodeEnum.ERROR.getCode(),
-                "检查名为【%s】的 bucket 是否存在时出错！", e);
+                "检查名为【" + bucket + "】的 bucket 是否存在时出错！", e);
         }
         if (!exists) {
-            throw new BusinessException(ErrorCodeEnum.ERROR.getCode(),
-                "名为【%s】的 bucket 不存在，请自行创建并赋予可读权限！");
+            try {
+                minioClient.makeBucket(MakeBucketArgs.builder().bucket(bucket).build());
+                log.info("[Kele-Doc] MinIO bucket【{}】不存在，已自动创建", bucket);
+            } catch (Exception e) {
+                throw new BusinessException(ErrorCodeEnum.ERROR.getCode(),
+                    "自动创建名为【" + bucket + "】的 bucket 失败！", e);
+            }
         }
         return minioClient;
     }
